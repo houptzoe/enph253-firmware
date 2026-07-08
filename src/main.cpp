@@ -3,15 +3,15 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define OLED_SCL 10
-#define OLED_SDA 11
+#define OLED_SCL 16
+#define OLED_SDA 15
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
 
 #ifndef PWM_L0_PIN
-#define PWM_L0_PIN 4
+#define PWM_L0_PIN 17
 #endif
 #ifndef PWM_L1_PIN
 #define PWM_L1_PIN 5
@@ -23,10 +23,10 @@
 #define PWM_R1_PIN 8
 #endif
 #ifndef BATTERY_VOLTAGE
-#define BATTERY_VOLTAGE 15.0f
+#define BATTERY_VOLTAGE 9.0f
 #endif
 #ifndef MOTOR_MAX_VOLTAGE
-#define MOTOR_MAX_VOLTAGE 15.0f
+#define MOTOR_MAX_VOLTAGE 6.0f
 #endif
 
 static const int PWM_L0_CHANNEL = 0;
@@ -227,9 +227,7 @@ void setup() {
 
 void loop() {
   motorLeftSetSpeed(100);
-  motorRightSetSpeed(100);
   showMotorLeftStatus(100);
-  showMotorRightStatus(100);
   display.display();
   delay(1000);
 }
