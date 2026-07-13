@@ -3,15 +3,15 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define OLED_SCL 16
-#define OLED_SDA 15
+#define OLED_SCL 42
+#define OLED_SDA 45
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET -1
 #define SCREEN_ADDRESS 0x3C
 
 #ifndef PWM_L0_PIN
-#define PWM_L0_PIN 17
+#define PWM_L0_PIN 4
 #endif
 #ifndef PWM_L1_PIN
 #define PWM_L1_PIN 5
@@ -23,10 +23,10 @@
 #define PWM_R1_PIN 8
 #endif
 #ifndef BATTERY_VOLTAGE
-#define BATTERY_VOLTAGE 9.0f
+#define BATTERY_VOLTAGE 16.0f
 #endif
 #ifndef MOTOR_MAX_VOLTAGE
-#define MOTOR_MAX_VOLTAGE 6.0f
+#define MOTOR_MAX_VOLTAGE 15.0f
 #endif
 
 static const int PWM_L0_CHANNEL = 0;
@@ -175,6 +175,38 @@ void showMotorRightStatus(int speedPercent) {
   display.printf("R0/R1 max %.1fV", MOTOR_MAX_VOLTAGE);
 }
 
+static void printMotorSpeedLine(int y, const char *label, int speedPercent) {
+  display.setTextSize(1);
+  display.setCursor(0, y);
+  display.printf("%s ", label);
+
+  display.setTextSize(2);
+  display.setCursor(24, y);
+  if (speedPercent > 0) {
+    display.printf("FWD %d%%", speedPercent);
+  } else if (speedPercent < 0) {
+    display.printf("REV %d%%", -speedPercent);
+  } else {
+    display.print(F("STOP"));
+  }
+}
+
+void showBothMotorsStatus(int leftSpeedPercent, int rightSpeedPercent) {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println(F("Motors"));
+
+  printMotorSpeedLine(16, "L", leftSpeedPercent);
+  printMotorSpeedLine(36, "R", rightSpeedPercent);
+
+  display.setTextSize(1);
+  display.setCursor(0, 56);
+  display.printf("max %.1fV", MOTOR_MAX_VOLTAGE);
+}
+
 void rampMotorLeftSpeed(int fromPercent, int toPercent, int stepPercent, int stepMs) {
   const int direction = (toPercent >= fromPercent) ? 1 : -1;
   for (int speed = fromPercent; direction > 0 ? speed <= toPercent : speed >= toPercent;
@@ -205,6 +237,22 @@ void rampMotorRightSpeed(int fromPercent, int toPercent, int stepPercent, int st
   }
 }
 
+void rampBothMotorsSpeed(int fromPercent, int toPercent, int stepPercent, int stepMs) {
+  const int direction = (toPercent >= fromPercent) ? 1 : -1;
+  for (int speed = fromPercent; direction > 0 ? speed <= toPercent : speed >= toPercent;
+       speed += stepPercent * direction) {
+    motorLeftSetSpeed(speed);
+    motorRightSetSpeed(speed);
+    showBothMotorsStatus(speed, speed);
+    display.display();
+    Serial.printf("Both motors: %d%% (duty %lu / %lu)\n", speed,
+                  static_cast<unsigned long>(
+                      (abs(speed) / 100.0f) * MOTOR_MAX_DUTY),
+                  static_cast<unsigned long>(MOTOR_MAX_DUTY));
+    delay(stepMs);
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   motorLeftInit();
@@ -221,13 +269,13 @@ void setup() {
                 PWM_R0_PIN, PWM_R1_PIN);
   Serial.printf("Max duty capped to %.0f%% (~%.1f V effective)\n",
                 (MOTOR_MAX_DUTY * 100.0f) / MOTOR_PWM_MAX, MOTOR_MAX_VOLTAGE);
-  showMotorLeftStatus(0);
+  showBothMotorsStatus(0, 0);
   display.display();
 }
 
 void loop() {
-  motorLeftSetSpeed(100);
-  showMotorLeftStatus(100);
-  display.display();
+  rampBothMotorsSpeed(0, 80, 10, 100);
+  delay(1000);
+  rampBothMotorsSpeed(80, 0, 10, 100);
   delay(1000);
 }
