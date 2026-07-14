@@ -10,7 +10,8 @@
 // ---------------------------------------------------------------------------
 // Robot-level tuning
 // ---------------------------------------------------------------------------
-constexpr float kBaseSpeed = 120.0f;  // forward duty added before steering correction
+constexpr float kBaseSpeed = 20.0f;  // forward cruise before steering correction
+constexpr float kMaxSpeed = 35.0f;   // hard ceiling so PID cannot overdrive
 
 static MotorDriver motors;
 static TapeFollowPid tapeFollow;
@@ -25,6 +26,11 @@ static void initTapeFollow() {
   config.leftReflectancePin = kLeftReflectancePin;
   config.rightReflectancePin = kRightReflectancePin;
   config.reflectanceThreshold = 650;
+  // Gains sized for low base speed (was kp=80, which overpowered cruise).
+  config.kp = 15.0f;
+  config.ki = 0.5f;
+  config.kd = 4.0f;
+  config.integralMax = 10.0f;
   tapeFollow.begin(config);
 }
 
@@ -47,12 +53,14 @@ void loop() {
   }
 
   // Differential drive: subtract correction from left, add to right.
+  // Speeds clamped to >= 0 so reverse PWM pins stay off for now.
   const float leftSpeed = constrain(kBaseSpeed - state.correction,
-                                    -MotorDriver::kPwmMax, MotorDriver::kPwmMax);
+                                    0.0f, kMaxSpeed);
   const float rightSpeed = constrain(kBaseSpeed + state.correction,
-                                     -MotorDriver::kPwmMax, MotorDriver::kPwmMax);
+                                     0.0f, kMaxSpeed);
   motors.applyDrive(leftSpeed, rightSpeed);
-  reflectanceDisplay.showReadings(state.leftAvg, state.rightAvg);
+  reflectanceDisplay.showReadings(state.leftAvg, state.rightAvg,
+                                  state.leftOnTape, state.rightOnTape);
 
   // Periodic debug output over USB serial.
   static uint32_t lastLogMs = 0;

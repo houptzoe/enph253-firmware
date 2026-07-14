@@ -59,7 +59,7 @@ void TapeFollowPid::begin(const TapeFollowConfig& config) {
 
 float TapeFollowPid::controlPeriodSec() const {
   return static_cast<float>(config_.samplePeriodUs) *
-         static_cast<float>(config_.samplesPerUpdate) / 1'000'000.0f;
+         static_cast<float>(config_.samplesPerUpdate) / 1000000.0f;
 }
 
 void TapeFollowPid::reset() { pid_.reset(); }

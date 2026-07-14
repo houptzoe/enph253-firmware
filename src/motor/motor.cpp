@@ -27,13 +27,16 @@ int MotorDriver::speedToPercent(float speed) const {
 // ---------------------------------------------------------------------------
 
 void MotorDriver::bridgeAllOff(const Bridge& bridge) {
-  ledcWrite(bridge.pin0, 0);
-  ledcWrite(bridge.pin1, 0);
+  ledcWrite(bridge.channel0, 0);
+  ledcWrite(bridge.channel1, 0);
 }
 
 void MotorDriver::setBridgeSpeed(Bridge& bridge, float speed) {
   speed = constrain(speed, -static_cast<float>(kSpeedMax),
                     static_cast<float>(kSpeedMax));
+  if (!kAllowReverse && speed < 0.0f) {
+    speed = 0.0f;
+  }
 
   if (fabsf(speed) < 0.5f) {
     bridgeAllOff(bridge);
@@ -47,11 +50,11 @@ void MotorDriver::setBridgeSpeed(Bridge& bridge, float speed) {
 
   if (newDirection == bridge.direction) {
     if (newDirection > 0) {
-      ledcWrite(bridge.pin1, 0);
-      ledcWrite(bridge.pin0, duty);
+      ledcWrite(bridge.channel1, 0);
+      ledcWrite(bridge.channel0, duty);
     } else {
-      ledcWrite(bridge.pin0, 0);
-      ledcWrite(bridge.pin1, duty);
+      ledcWrite(bridge.channel0, 0);
+      ledcWrite(bridge.channel1, duty);
     }
     return;
   }
@@ -60,17 +63,17 @@ void MotorDriver::setBridgeSpeed(Bridge& bridge, float speed) {
   bridgeAllOff(bridge);
 
   if (prevDirection != 0 && newDirection != prevDirection) {
-    delay(kSwitchDeadtimeMs);
+    delay(kSwitchDeadtimeMs);  // 5 ms deadtime when flipping FWD <-> REV
   }
 
   bridge.direction = newDirection;
 
   if (newDirection > 0) {
-    ledcWrite(bridge.pin1, 0);
-    ledcWrite(bridge.pin0, duty);
+    ledcWrite(bridge.channel1, 0);
+    ledcWrite(bridge.channel0, duty);
   } else {
-    ledcWrite(bridge.pin0, 0);
-    ledcWrite(bridge.pin1, duty);
+    ledcWrite(bridge.channel0, 0);
+    ledcWrite(bridge.channel1, duty);
   }
 }
 
@@ -79,8 +82,10 @@ void MotorDriver::setBridgeSpeed(Bridge& bridge, float speed) {
 // ---------------------------------------------------------------------------
 
 void MotorDriver::initBridge(Bridge& bridge) {
-  ledcAttach(bridge.pin0, kPwmFreqHz, kPwmResolutionBits);
-  ledcAttach(bridge.pin1, kPwmFreqHz, kPwmResolutionBits);
+  ledcSetup(bridge.channel0, kPwmFreqHz, kPwmResolutionBits);
+  ledcSetup(bridge.channel1, kPwmFreqHz, kPwmResolutionBits);
+  ledcAttachPin(bridge.pin0, bridge.channel0);
+  ledcAttachPin(bridge.pin1, bridge.channel1);
   bridgeAllOff(bridge);
   bridge.direction = 0;
 }

@@ -26,12 +26,13 @@ void ReflectanceDisplay::begin() {
   }
 
   display.clearDisplay();
-  display.setTextSize(2);
+  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.display();
 }
 
-void ReflectanceDisplay::showReadings(int leftAvg, int rightAvg) {
+void ReflectanceDisplay::showReadings(int leftAvg, int rightAvg, bool leftOnTape,
+                                      bool rightOnTape) {
   const uint32_t nowMs = millis();
   if (nowMs - lastUpdateMs_ < kMinUpdateMs) {
     return;
@@ -39,9 +40,21 @@ void ReflectanceDisplay::showReadings(int leftAvg, int rightAvg) {
   lastUpdateMs_ = nowMs;
 
   display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
   display.setCursor(0, 0);
   display.println(F("Reflectance"));
-  display.printf("L: %4d\n", leftAvg);
-  display.printf("R: %4d", rightAvg);
+
+  display.setCursor(0, 16);
+  display.printf("L analog: %4d", leftAvg);
+  display.setCursor(0, 28);
+  display.printf("L digital: %s", leftOnTape ? "ON " : "OFF");
+
+  display.setCursor(0, 44);
+  display.printf("R analog: %4d", rightAvg);
+  display.setCursor(0, 56);
+  display.printf("R digital: %s", rightOnTape ? "ON " : "OFF");
+
   display.display();
 }
