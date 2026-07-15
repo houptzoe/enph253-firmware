@@ -10,8 +10,8 @@
 // ---------------------------------------------------------------------------
 // Robot-level tuning
 // ---------------------------------------------------------------------------
-constexpr float kBaseSpeed = 20.0f;  // forward cruise before steering correction
-constexpr float kMaxSpeed = 35.0f;   // hard ceiling so PID cannot overdrive
+constexpr float kBaseSpeed = 30.0f;  // forward cruise before steering correction
+constexpr float kMaxSpeed = 150.0f;   // hard ceiling so PID cannot overdrive
 
 static MotorDriver motors;
 static TapeFollowPid tapeFollow;
