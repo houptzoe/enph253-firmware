@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 // Robot-level tuning
 // ---------------------------------------------------------------------------
-constexpr float kBaseSpeed = 30.0f;  // forward cruise before steering correction
+constexpr float kBaseSpeed = 70.0f;  // forward cruise before steering correction
 constexpr float kMaxSpeed = 150.0f;   // hard ceiling so PID cannot overdrive
 
 static MotorDriver motors;
@@ -27,8 +27,8 @@ static void initTapeFollow() {
   config.rightReflectancePin = kRightReflectancePin;
   config.reflectanceThreshold = 650;
   // Gains sized for low base speed (was kp=80, which overpowered cruise).
-  config.kp = 15.0f;
-  config.ki = 0.5f;
+  config.kp = 20.0f;
+  config.ki = 0.8f;
   config.kd = 4.0f;
   config.integralMax = 10.0f;
   tapeFollow.begin(config);
