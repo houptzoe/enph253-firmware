@@ -10,11 +10,11 @@ constexpr int kRightReflectancePin = 2;
 // Drive motors — two-wire H-bridge: PWM the active direction pin per side.
 // Left:  pwmL0 forward (GPIO 4), pwmL1 reverse (GPIO 5)
 // Right: pwmR0 forward (GPIO 7), pwmR1 reverse (GPIO 8)
-constexpr int kLeftMotorPwm0Pin = 4;
-constexpr int kLeftMotorPwm1Pin = 5;
-constexpr int kRightMotorPwm0Pin = 7;
-constexpr int kRightMotorPwm1Pin = 8;
+constexpr int kLeftMotorPwm0Pin = 3;
+constexpr int kLeftMotorPwm1Pin = 4;
+constexpr int kRightMotorPwm0Pin = 5;
+constexpr int kRightMotorPwm1Pin = 6;
 
 // OLED display — I2C (SSD1306).
-constexpr int kOledSclPin = 42;
-constexpr int kOledSdaPin = 45;
+constexpr int kOledSclPin = 45;
+constexpr int kOledSdaPin = 46;

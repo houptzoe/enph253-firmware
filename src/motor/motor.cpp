@@ -41,12 +41,16 @@ void MotorDriver::setBridgeSpeed(Bridge& bridge, float speed) {
   if (fabsf(speed) < 0.5f) {
     bridgeAllOff(bridge);
     bridge.direction = 0;
+    bridge.lastSpeed = 0.0f;
+    bridge.lastDuty = 0;
     return;
   }
 
   const int newDirection = speed > 0.0f ? 1 : -1;
   const int speedPercent = speedToPercent(speed);
   const uint32_t duty = percentToDuty(speedPercent);
+  bridge.lastSpeed = speed;
+  bridge.lastDuty = duty;
 
   if (newDirection == bridge.direction) {
     if (newDirection > 0) {

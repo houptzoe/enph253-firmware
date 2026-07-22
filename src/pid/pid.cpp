@@ -27,6 +27,15 @@ void TapeFollowPid::PidController::reset() {
   lastError_ = 0.0f;
 }
 
+void TapeFollowPid::PidController::setGains(float kp, float ki, float kd,
+                                            float integralMax) {
+  kp_ = kp;
+  ki_ = ki;
+  kd_ = kd;
+  integralMax_ = integralMax;
+  reset();
+}
+
 // ---------------------------------------------------------------------------
 // Initialization — ADC setup and 10 kHz sample timer
 // ---------------------------------------------------------------------------
@@ -63,6 +72,14 @@ float TapeFollowPid::controlPeriodSec() const {
 }
 
 void TapeFollowPid::reset() { pid_.reset(); }
+
+void TapeFollowPid::setGains(float kp, float ki, float kd, float integralMax) {
+  config_.kp = kp;
+  config_.ki = ki;
+  config_.kd = kd;
+  config_.integralMax = integralMax;
+  pid_.setGains(kp, ki, kd, integralMax);
+}
 
 // ---------------------------------------------------------------------------
 // Thresholding and line-error from pseudo-digital sensor states

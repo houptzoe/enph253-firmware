@@ -13,6 +13,11 @@ class MotorDriver {
   void applyDrive(float leftSpeed, float rightSpeed);  // signed: +forward, -reverse
   void stop();
 
+  float leftSpeed() const { return left_.lastSpeed; }
+  float rightSpeed() const { return right_.lastSpeed; }
+  uint32_t leftDuty() const { return left_.lastDuty; }
+  uint32_t rightDuty() const { return right_.lastDuty; }
+
   // Speed input range used by main (maps to voltage-limited PWM duty internally).
   static constexpr int kSpeedMax = 255;
   static constexpr int kPwmMax = kSpeedMax;
@@ -31,9 +36,17 @@ class MotorDriver {
     int channel0;
     int channel1;
     int direction;  // -1 reverse, 0 stopped, +1 forward
+    float lastSpeed;
+    uint32_t lastDuty;
 
     Bridge(int p0, int p1, int c0, int c1)
-        : pin0(p0), pin1(p1), channel0(c0), channel1(c1), direction(0) {}
+        : pin0(p0),
+          pin1(p1),
+          channel0(c0),
+          channel1(c1),
+          direction(0),
+          lastSpeed(0.0f),
+          lastDuty(0) {}
   };
 
   void initBridge(Bridge& bridge);
