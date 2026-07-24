@@ -25,10 +25,8 @@ class MotorDriver {
  private:
   static constexpr int kPwmFreqHz = 200;
   static constexpr int kPwmResolutionBits = 10;
-  static constexpr uint32_t kSwitchDeadtimeMs = 5;
-  // When false, negative speeds coast (pwm*1 stays off). Keep reverse path +
-  // deadtime ready for later use.
-  static constexpr bool kAllowReverse = false;
+  static constexpr uint32_t kSwitchDeadtimeMs = 10;
+  static constexpr bool kAllowReverse = true;
 
   struct Bridge {
     int pin0;

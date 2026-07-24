@@ -1,17 +1,22 @@
 #include <Arduino.h>
 
 #include "display/display.h"
+#include "hardware/mission_config.h"
 #include "hardware/pins.h"
+#include "mission/mission.h"
 #include "motor/motor.h"
 #include "pid/pid.h"
+#include "sensors/vision.h"
 #include "telemetry/telemetry.h"
 
-// Robot application — wires tape-follow PID output to the motor driver.
+// Teletubby handshake test — tape-follow always; Pi START/DETECT via vision.
 
 static MotorDriver motors;
 static TapeFollowPid tapeFollow;
 static ReflectanceDisplay reflectanceDisplay;
 static TelemetryServer telemetry;
+static VisionInference vision;
+static MissionController mission;
 
 // ---------------------------------------------------------------------------
 // Subsystem setup helpers
@@ -33,6 +38,32 @@ static void initTapeFollow() {
   tapeFollow.begin(config);
 }
 
+// Bench inject for teletubby DETECT without the Pi.
+static void pollSerialCommands() {
+  while (Serial.available() > 0) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    line.toUpperCase();
+    if (line.length() == 0) {
+      continue;
+    }
+
+    if (line == "!START" || line == "START") {
+      mission.start();
+      Serial.println("[CMD] mission start");
+    } else if (line == "!ABORT" || line == "ABORT" || line == "!STOP") {
+      mission.abort();
+      Serial.println("[CMD] mission abort");
+    } else if (line == "!TT" || line == "TT" || line == "!DETECT") {
+      vision.inject();
+      Serial.println("[CMD] inject teletubby DETECT");
+    } else if (line == "!CLR" || line == "CLR") {
+      vision.clearInject();
+      Serial.println("[CMD] clear injects");
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Arduino entry points
 // ---------------------------------------------------------------------------
@@ -43,7 +74,8 @@ void setup() {
 
   // Diagnostic: distinguish brownout resets (weak supply) from crashes.
   Serial.printf("[BOOT] Reset reason: %d (1=poweron 3=sw 4=panic 5/6/7=wdt "
-                "9=brownout)\n", esp_reset_reason());
+                "9=brownout)\n",
+                esp_reset_reason());
 
   // Bring SoftAP up first so a hung OLED/I2C init cannot block WiFi.
   telemetry.begin(tapeFollow, motors);
@@ -51,17 +83,55 @@ void setup() {
   motors.begin();
   reflectanceDisplay.begin();
   initTapeFollow();
+
+  vision.begin();
+  mission.begin(vision);
+
+  Serial.println(
+      "[BOOT] teletubby handshake test — Serial: !START !ABORT !TT !CLR");
 }
 
 void loop() {
+  pollSerialCommands();
+  mission.update();
+
   TapeFollowState state;
   if (tapeFollow.update(state)) {
     const DriveSettings& drive = telemetry.drive();
     float leftSpeed = 0.0f;
     float rightSpeed = 0.0f;
 
-    if (drive.running) {
-      // Differential drive: subtract correction from left, add to right.
+    // SoftAP Start/Stop also arms/aborts the mission FSM.
+    static bool wasRunning = false;
+    if (drive.running && !wasRunning && !mission.active()) {
+      mission.start();
+    } else if (!drive.running && wasRunning && mission.active()) {
+      mission.abort();
+    }
+    wasRunning = drive.running;
+
+    const MissionDriveCommand cmd = mission.driveCommand();
+    const bool missionRunning = mission.active();
+
+    // While searching, force base speed 65; otherwise use SoftAP bases.
+    const float leftBase = mission.searching()
+                               ? MissionConfig::kTeletubbySearchBaseSpeed
+                               : drive.leftBaseSpeed;
+    const float rightBase = mission.searching()
+                                ? MissionConfig::kTeletubbySearchBaseSpeed
+                                : drive.rightBaseSpeed;
+
+    if (missionRunning) {
+      if (cmd.mode == MissionDriveCommand::Mode::TapeFollow) {
+        leftSpeed = constrain(leftBase - state.correction, 0.0f, drive.maxSpeed);
+        rightSpeed =
+            constrain(rightBase + state.correction, 0.0f, drive.maxSpeed);
+        motors.applyDrive(leftSpeed, rightSpeed);
+      } else {
+        motors.stop();
+      }
+    } else if (drive.running) {
+      // Manual tape-follow after abort (or before first start).
       leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
                             drive.maxSpeed);
       rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
@@ -84,10 +154,11 @@ void loop() {
     if (nowMs - lastLogMs >= 200) {
       lastLogMs = nowMs;
       Serial.printf(
-          "run:%d L:%4d(%d) R:%4d(%d) err:%.1f corr:%.1f Lspd:%.0f Rspd:%.0f\n",
-          drive.running ? 1 : 0, state.leftAvg, state.leftOnTape, state.rightAvg,
-          state.rightOnTape, state.error, state.correction, leftSpeed,
-          rightSpeed);
+          "run:%d miss:%s L:%4d(%d) R:%4d(%d) err:%.1f corr:%.1f "
+          "Lspd:%.0f Rspd:%.0f\n",
+          drive.running ? 1 : 0, mission.phaseName(), state.leftAvg,
+          state.leftOnTape, state.rightAvg, state.rightOnTape, state.error,
+          state.correction, leftSpeed, rightSpeed);
     }
   }
 

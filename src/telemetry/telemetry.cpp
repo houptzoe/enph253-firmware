@@ -7,7 +7,6 @@
 namespace {
 
 constexpr const char* kApSsid = "dragonflyyy";
-constexpr const char* kApPassword = "far5678";
 
 WebServer server(80);
 
@@ -172,23 +171,19 @@ void TelemetryServer::begin(TapeFollowPid& pid, MotorDriver& motors) {
   IPAddress subnet(255, 255, 255, 0);
   WiFi.softAPConfig(ip, gateway, subnet);
 
+  // Open SoftAP (no password).
   bool ok = false;
   for (int attempt = 0; attempt < 3 && !ok; ++attempt) {
-    ok = WiFi.softAP(kApSsid, kApPassword, /*channel=*/1);
-    Serial.printf("[WIFI] softAP WPA attempt %d -> %d (pass len=%u)\n",
-                  attempt + 1, ok ? 1 : 0,
-                  static_cast<unsigned>(strlen(kApPassword)));
+    ok = WiFi.softAP(kApSsid, nullptr, /*channel=*/1);
+    Serial.printf("[WIFI] softAP open attempt %d -> %d\n", attempt + 1,
+                  ok ? 1 : 0);
     if (!ok) {
       delay(200);
     }
   }
-  if (!ok) {
-    Serial.println("[WIFI] WPA SoftAP failed — open network fallback");
-    ok = WiFi.softAP(kApSsid, nullptr, 1);
-  }
 
-  Serial.printf("[WIFI] softAP()=%d  SSID='%s'  IP=%s  MAC=%s\n", ok ? 1 : 0,
-                kApSsid, WiFi.softAPIP().toString().c_str(),
+  Serial.printf("[WIFI] softAP()=%d  SSID='%s' (open)  IP=%s  MAC=%s\n",
+                ok ? 1 : 0, kApSsid, WiFi.softAPIP().toString().c_str(),
                 WiFi.softAPmacAddress().c_str());
 
   if (!ok) {
