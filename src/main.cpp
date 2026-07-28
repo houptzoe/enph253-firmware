@@ -1,7 +1,6 @@
 #include <Arduino.h>
 
 #include "display/display.h"
-#include "hardware/mission_config.h"
 #include "hardware/pins.h"
 #include "mission/mission.h"
 #include "motor/motor.h"
@@ -113,19 +112,13 @@ void loop() {
     const MissionDriveCommand cmd = mission.driveCommand();
     const bool missionRunning = mission.active();
 
-    // While searching, force base speed 65; otherwise use SoftAP bases.
-    const float leftBase = mission.searching()
-                               ? MissionConfig::kTeletubbySearchBaseSpeed
-                               : drive.leftBaseSpeed;
-    const float rightBase = mission.searching()
-                                ? MissionConfig::kTeletubbySearchBaseSpeed
-                                : drive.rightBaseSpeed;
-
+    // SoftAP left/right base speeds apply in both mission and manual drive.
     if (missionRunning) {
       if (cmd.mode == MissionDriveCommand::Mode::TapeFollow) {
-        leftSpeed = constrain(leftBase - state.correction, 0.0f, drive.maxSpeed);
-        rightSpeed =
-            constrain(rightBase + state.correction, 0.0f, drive.maxSpeed);
+        leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
+                              drive.maxSpeed);
+        rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
+                               drive.maxSpeed);
         motors.applyDrive(leftSpeed, rightSpeed);
       } else {
         motors.stop();

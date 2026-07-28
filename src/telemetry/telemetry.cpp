@@ -1,5 +1,6 @@
 #include "telemetry/telemetry.h"
 
+#include <ArduinoOTA.h>
 #include <WiFi.h>
 #include <WebServer.h>
 #include <esp_wifi.h>
@@ -41,8 +42,8 @@ const char kIndexHtml[] PROGMEM = R"HTML(
 <button id="stop" class="stop">Stop</button>
 
 <h2>Base speeds</h2>
-<label>Left base <input id="lbase" type="number" step="1" min="0" max="255"/></label>
-<label>Right base <input id="rbase" type="number" step="1" min="0" max="255"/></label>
+<label>Left base <input id="lbase" type="number" step="1" min="70" max="255"/></label>
+<label>Right base <input id="rbase" type="number" step="1" min="70" max="255"/></label>
 <button id="applySpeed">Apply speeds</button>
 
 <h2>PID gains</h2>
@@ -197,6 +198,18 @@ void TelemetryServer::begin(TapeFollowPid& pid, MotorDriver& motors) {
   server.on("/api/drive", HTTP_POST, [this]() { handleDrive(); });
   server.begin();
   Serial.println("[WIFI] HTTP server listening on :80 — scan for SSID now");
+
+  ArduinoOTA.setHostname("dragonflyyy");
+  ArduinoOTA.onStart([]() { Serial.println("[OTA] start"); });
+  ArduinoOTA.onEnd([]() { Serial.println("\n[OTA] end"); });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("[OTA] %u%%\r", (progress * 100) / total);
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("[OTA] error %u\n", static_cast<unsigned>(error));
+  });
+  ArduinoOTA.begin();
+  Serial.println("[OTA] listening on 192.168.4.1:3232 (connect to SoftAP first)");
 }
 
 void TelemetryServer::updateSnapshot(const TelemetrySnapshot& snapshot) {
@@ -205,6 +218,7 @@ void TelemetryServer::updateSnapshot(const TelemetrySnapshot& snapshot) {
 
 void TelemetryServer::poll() {
   server.handleClient();
+  ArduinoOTA.handle();
 
   static uint32_t lastHeartbeatMs = 0;
   const uint32_t nowMs = millis();
@@ -271,13 +285,13 @@ void TelemetryServer::handleDrive() {
   }
   if (body.indexOf("\"leftBase\"") >= 0) {
     drive_.leftBaseSpeed =
-        constrain(parseJsonFloat(body, "leftBase", drive_.leftBaseSpeed), 0.0f,
-                  drive_.maxSpeed);
+        constrain(parseJsonFloat(body, "leftBase", drive_.leftBaseSpeed),
+                  MissionConfig::kMinBaseSpeed, drive_.maxSpeed);
   }
   if (body.indexOf("\"rightBase\"") >= 0) {
     drive_.rightBaseSpeed =
         constrain(parseJsonFloat(body, "rightBase", drive_.rightBaseSpeed),
-                  0.0f, drive_.maxSpeed);
+                  MissionConfig::kMinBaseSpeed, drive_.maxSpeed);
   }
 
   if (!drive_.running && motors_ != nullptr) {

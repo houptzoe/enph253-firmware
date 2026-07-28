@@ -179,6 +179,7 @@
  C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_hw_support/include/soc/esp32/spiram.h \
  C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
  C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
- include/display/display.h include/hardware/mission_config.h \
- include/hardware/pins.h include/mission/mission.h include/motor/motor.h \
- include/sensors/vision.h include/pid/pid.h include/telemetry/telemetry.h
+ include/display/display.h include/hardware/pins.h \
+ include/mission/mission.h include/motor/motor.h include/sensors/vision.h \
+ include/pid/pid.h include/telemetry/telemetry.h \
+ include/hardware/mission_config.h

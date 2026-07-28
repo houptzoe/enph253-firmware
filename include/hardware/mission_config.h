@@ -6,8 +6,11 @@
 
 namespace MissionConfig {
 
+// Floor for left/right base speed (telemetry + search cruise).
+constexpr float kMinBaseSpeed = 70.0f;
+
 // Base speed while searching for teletubby (tape-follow).
-constexpr float kTeletubbySearchBaseSpeed = 65.0f;
+constexpr float kTeletubbySearchBaseSpeed = kMinBaseSpeed;
 
 // Hold motors stopped this long after DETECT before resuming tape-follow.
 constexpr uint32_t kTeletubbyStopMs = 1000;
