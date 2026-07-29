@@ -22,14 +22,16 @@ constexpr int kOledSdaPin = 46;
 // IR detector - GPIO 7 (ADC1_CH6)
 constexpr int kIrDetectorPin = 7;
 
-// saved for future use - GPIO 8, 9, 10 (ADC1_CH7, ADC1_CH8, ADC1_CH9)
+// saved for future use - GPIO 8, 9 
+
+// 10 (ADC1_CH7, ADC1_CH8, ADC1_CH9)
 
 //pi comms - GPIO 11 & GPIO 12
 constexpr int kPiCommsLeftPin = 11;
 constexpr int kPiCommsRightPin = 12;
 
 //metal detector - GPIO 13, 14
-constexpr int kMetalDetectorLeftPin = 13;
+constexpr int kMetalDetectorLeftPin = 13; //empty
 constexpr int kMetalDetectorRightPin = 14;
 
 //servo motor - GPIO 42
