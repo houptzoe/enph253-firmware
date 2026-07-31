@@ -11,12 +11,14 @@ struct TapeFollowConfig {
   int leftReflectancePin = kLeftReflectancePin;
   int rightReflectancePin = kRightReflectancePin;
   int reflectanceThreshold = 650;    // hi-lo cutoff between off-tape and on-tape
-  uint32_t samplePeriodUs = 100;     // 10 kHz sensor sampling
-  uint16_t samplesPerUpdate = 50;    // average samples → 200 Hz control loop
-  float kp = 80.0f;
-  float ki = 2.0f;
+  // 2 kHz sampling: two analogReads take ~100 us, so a faster period saturates
+  // the esp_timer task on CPU 0 and trips the task watchdog (reboot loop).
+  uint32_t samplePeriodUs = 500;
+  uint16_t samplesPerUpdate = 10;    // average samples → 200 Hz control loop
+  float kp = 35.0f;
+  float ki = 0.0f;
   float kd = 12.0f;
-  float integralMax = 40.0f;         // anti-windup clamp
+  float integralMax = 10.0f;         // anti-windup clamp
 };
 
 // Latest sensor readings and PID output, produced each control tick.
@@ -36,6 +38,10 @@ class TapeFollowPid {
   void reset();
   float controlPeriodSec() const;
 
+  // Live tuning — updates gains and clears integral windup.
+  void setGains(float kp, float ki, float kd, float integralMax);
+  TapeFollowConfig getConfig() const { return config_; }
+
  private:
   // Standard PID with integral clamping.
   class PidController {
@@ -44,6 +50,7 @@ class TapeFollowPid {
 
     float update(float error, float dtSec);
     void reset();
+    void setGains(float kp, float ki, float kd, float integralMax);
 
    private:
     float kp_, ki_, kd_, integralMax_;
