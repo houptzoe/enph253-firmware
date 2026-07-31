@@ -29,10 +29,10 @@ static void initTapeFollow() {
   // Slower sampler so SoftAP beacons are not starved on CPU0 (was 500 us).
   config.samplePeriodUs = 2000;
   config.samplesPerUpdate = 5;  // still ~100 Hz control
-  // Gains sized for low base speed (was kp=80, which overpowered cruise).
-  config.kp = 25.0f;
-  //config.ki = 0.8f;
-  //config.kd = 4.0f;
+  // Gains from feature/pid, sized for SoftAP cruise speeds.
+  config.kp = 35.0f;
+  config.ki = 0.0f;
+  config.kd = 12.0f;
   config.integralMax = 10.0f;
   tapeFollow.begin(config);
 }

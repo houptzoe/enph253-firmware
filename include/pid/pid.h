@@ -15,10 +15,10 @@ struct TapeFollowConfig {
   // the esp_timer task on CPU 0 and trips the task watchdog (reboot loop).
   uint32_t samplePeriodUs = 500;
   uint16_t samplesPerUpdate = 10;    // average samples → 200 Hz control loop
-  float kp = 80.0f;
-  float ki = 2.0f;
+  float kp = 35.0f;
+  float ki = 0.0f;
   float kd = 12.0f;
-  float integralMax = 40.0f;         // anti-windup clamp
+  float integralMax = 10.0f;         // anti-windup clamp
 };
 
 // Latest sensor readings and PID output, produced each control tick.

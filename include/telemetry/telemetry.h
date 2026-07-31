@@ -1,6 +1,5 @@
 #pragma once
 
-#include "hardware/mission_config.h"
 #include "motor/motor.h"
 #include "pid/pid.h"
 
@@ -13,8 +12,8 @@ struct TelemetrySnapshot {
 
 struct DriveSettings {
   bool running = false;  // motors off until Start is pressed
-  float leftBaseSpeed = MissionConfig::kTeletubbySearchBaseSpeed;
-  float rightBaseSpeed = MissionConfig::kTeletubbySearchBaseSpeed;
+  float leftBaseSpeed = 80.0f;
+  float rightBaseSpeed = 80.0f;
   float maxSpeed = 150.0f;
 };
 
