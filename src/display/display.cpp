@@ -58,3 +58,14 @@ void ReflectanceDisplay::showReadings(int leftAvg, int rightAvg, bool leftOnTape
 
   display.display();
 }
+
+void ReflectanceDisplay::showMessage(const char* line1, const char* line2) {
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setTextColor(SSD1306_WHITE);
+  display.setCursor(0, 0);
+  display.println(line1);
+  display.setCursor(0, 20);
+  display.println(line2);
+  display.display();
+}
