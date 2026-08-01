@@ -58,3 +58,24 @@ void ReflectanceDisplay::showReadings(int leftAvg, int rightAvg, bool leftOnTape
 
   display.display();
 }
+
+void ReflectanceDisplay::showTeletubbyDetected(int8_t camera) {
+  const uint32_t nowMs = millis();
+  if (nowMs - lastUpdateMs_ < kMinUpdateMs) {
+    return;
+  }
+  lastUpdateMs_ = nowMs;
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setTextSize(1);
+  display.setCursor(0, 8);
+  display.println(F("TELETUBBY DETECTED"));
+
+  display.setTextSize(2);
+  display.setCursor(0, 32);
+  display.printf("CAM %d", static_cast<int>(camera));
+
+  display.display();
+}

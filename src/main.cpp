@@ -8,7 +8,7 @@
 #include "sensors/vision.h"
 #include "telemetry/telemetry.h"
 
-// Teletubby handshake test — tape-follow always; Pi START/DETECT via vision.
+// Dual-cam teletubby handshake — tape-follow; Pi START/DETECT via vision.
 
 static MotorDriver motors;
 static TapeFollowPid tapeFollow;
@@ -53,9 +53,13 @@ static void pollSerialCommands() {
     } else if (line == "!ABORT" || line == "ABORT" || line == "!STOP") {
       mission.abort();
       Serial.println("[CMD] mission abort");
-    } else if (line == "!TT" || line == "TT" || line == "!DETECT") {
-      vision.inject();
-      Serial.println("[CMD] inject teletubby DETECT");
+    } else if (line == "!TT" || line == "TT" || line == "!DETECT" ||
+               line == "!TT0" || line == "TT0") {
+      vision.inject(0);
+      Serial.println("[CMD] inject DETECT_CAM0");
+    } else if (line == "!TT1" || line == "TT1") {
+      vision.inject(1);
+      Serial.println("[CMD] inject DETECT_CAM1");
     } else if (line == "!CLR" || line == "CLR") {
       vision.clearInject();
       Serial.println("[CMD] clear injects");
@@ -87,12 +91,26 @@ void setup() {
   mission.begin(vision);
 
   Serial.println(
-      "[BOOT] teletubby handshake test — Serial: !START !ABORT !TT !CLR");
+      "[BOOT] dual-cam handshake — Serial: !START !ABORT !TT0 !TT1 !CLR");
 }
 
 void loop() {
   pollSerialCommands();
+
+  switch (telemetry.takeVisionCommand()) {
+    case VisionCommand::Start:
+      mission.start();
+      break;
+    case VisionCommand::Stop:
+      mission.abort();
+      break;
+    case VisionCommand::None:
+      break;
+  }
+
   mission.update();
+  telemetry.updateMissionStatus(mission.phaseName(),
+                                mission.lastDetectedCamera());
 
   TapeFollowState state;
   if (tapeFollow.update(state)) {
@@ -113,7 +131,8 @@ void loop() {
     const bool missionRunning = mission.active();
 
     // SoftAP left/right base speeds apply in both mission and manual drive.
-    if (missionRunning) {
+    // Motors only turn with Drive running, so Start Vision can search in place.
+    if (missionRunning && drive.running) {
       if (cmd.mode == MissionDriveCommand::Mode::TapeFollow) {
         leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
                               drive.maxSpeed);
@@ -134,8 +153,12 @@ void loop() {
       motors.stop();
     }
 
-    reflectanceDisplay.showReadings(state.leftAvg, state.rightAvg,
-                                    state.leftOnTape, state.rightOnTape);
+    if (mission.lastDetectedCamera() >= 0) {
+      reflectanceDisplay.showTeletubbyDetected(mission.lastDetectedCamera());
+    } else {
+      reflectanceDisplay.showReadings(state.leftAvg, state.rightAvg,
+                                      state.leftOnTape, state.rightOnTape);
+    }
 
     TelemetrySnapshot snap;
     snap.error = state.error;

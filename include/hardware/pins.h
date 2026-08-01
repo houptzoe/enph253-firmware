@@ -21,11 +21,11 @@ constexpr int kIrDetectorPin = 7;
 
 // Spare ADC1 inputs — GPIO 8 (ADC1_CH7), GPIO 9 (ADC1_CH8). Unassigned.
 
-// Pi ↔ ESP handshake (see src/sensors/pi-handshake.md when present).
-// START out (ESP→Pi rising edge): GPIO 10 → Pi BCM GPIO2
-// DETECT in (Pi→ESP ~100 ms pulse): GPIO 11 → Pi BCM GPIO3
-constexpr int kPiStartPin = 10;
-constexpr int kPiDetectPin = 11;
+// Pi ↔ ESP dual-cam handshake (see lib/ESP32-GPIO-HANDSHAKE.md).
+// ESP GPIO 11 → Pi BCM GPIO3 (physical 5): DETECT_CAM0
+// ESP GPIO 10 → Pi BCM GPIO4 (physical 7): START out + DETECT_CAM1 (multiplexed)
+constexpr int kPiCam0Pin = 11;
+constexpr int kPiCam1StartPin = 10;
 
 // Metal detectors — GPIO 13, 14
 constexpr int kMetalDetectorLeftPin = 13;

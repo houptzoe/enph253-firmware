@@ -41,6 +41,12 @@ const char kIndexHtml[] PROGMEM = R"HTML(
 <button id="start">Start</button>
 <button id="stop" class="stop">Stop</button>
 
+<h2>Vision (Pi)</h2>
+<p>Search <span id="vstatus" class="off">Idle</span></p>
+<button id="vstart">Start Vision</button>
+<button id="vstop" class="stop">Stop Vision</button>
+<div class="row"><span>Detection</span><span class="val" id="vdet">—</span></div>
+
 <h2>Base speeds</h2>
 <label>Left base <input id="lbase" type="number" step="1" min="0" max="255"/></label>
 <label>Right base <input id="rbase" type="number" step="1" min="0" max="255"/></label>
@@ -82,6 +88,9 @@ async function refresh(){
     rd.textContent=j.rightDuty;
     err.textContent=j.error.toFixed(2);
     corr.textContent=j.correction.toFixed(2);
+    vstatus.textContent=j.missionPhase;
+    vstatus.className=j.missionPhase==='Idle'?'off':'on';
+    vdet.textContent=j.camera<0?'—':('TELETUBBY DETECTED — CAM '+j.camera);
   }catch(e){}
 }
 start.onclick=async()=>{
@@ -92,6 +101,16 @@ start.onclick=async()=>{
 stop.onclick=async()=>{
   msg.textContent='Stopping…';
   try{const r=await post('/api/drive',{running:false});msg.textContent=r.ok?'Stopped.':'Failed.';}
+  catch(e){msg.textContent='Network error.';}
+};
+vstart.onclick=async()=>{
+  msg.textContent='Starting vision…';
+  try{const r=await post('/api/vision',{start:true});msg.textContent=r.ok?'Vision searching.':'Failed.';}
+  catch(e){msg.textContent='Network error.';}
+};
+vstop.onclick=async()=>{
+  msg.textContent='Stopping vision…';
+  try{const r=await post('/api/vision',{start:false});msg.textContent=r.ok?'Vision stopped.':'Failed.';}
   catch(e){msg.textContent='Network error.';}
 };
 applySpeed.onclick=async()=>{
@@ -200,12 +219,25 @@ void TelemetryServer::begin(TapeFollowPid& pid, MotorDriver& motors) {
   server.on("/api/status", HTTP_GET, [this]() { handleStatus(); });
   server.on("/api/pid", HTTP_POST, [this]() { handlePid(); });
   server.on("/api/drive", HTTP_POST, [this]() { handleDrive(); });
+  server.on("/api/vision", HTTP_POST, [this]() { handleVision(); });
   server.begin();
   Serial.println("[WIFI] HTTP server listening on :80 — scan for SSID now");
 }
 
 void TelemetryServer::updateSnapshot(const TelemetrySnapshot& snapshot) {
   snapshot_ = snapshot;
+}
+
+void TelemetryServer::updateMissionStatus(const char* phaseName,
+                                          int8_t detectedCamera) {
+  missionPhase_ = phaseName;
+  detectedCamera_ = detectedCamera;
+}
+
+VisionCommand TelemetryServer::takeVisionCommand() {
+  const VisionCommand cmd = visionCommand_;
+  visionCommand_ = VisionCommand::None;
+  return cmd;
 }
 
 void TelemetryServer::poll() {
@@ -232,19 +264,21 @@ void TelemetryServer::handleStatus() {
   }
 
   const TapeFollowConfig cfg = pid_->getConfig();
-  char buf[384];
+  char buf[512];
   snprintf(buf, sizeof(buf),
            "{\"kp\":%.3f,\"ki\":%.3f,\"kd\":%.3f,\"integralMax\":%.3f,"
            "\"running\":%s,\"leftBase\":%.2f,\"rightBase\":%.2f,"
            "\"leftSpeed\":%.2f,\"rightSpeed\":%.2f,"
            "\"leftDuty\":%lu,\"rightDuty\":%lu,"
-           "\"error\":%.3f,\"correction\":%.3f}",
+           "\"error\":%.3f,\"correction\":%.3f,"
+           "\"missionPhase\":\"%s\",\"camera\":%d}",
            cfg.kp, cfg.ki, cfg.kd, cfg.integralMax,
            drive_.running ? "true" : "false", drive_.leftBaseSpeed,
            drive_.rightBaseSpeed, motors_->leftSpeed(), motors_->rightSpeed(),
            static_cast<unsigned long>(motors_->leftDuty()),
            static_cast<unsigned long>(motors_->rightDuty()), snapshot_.error,
-           snapshot_.correction);
+           snapshot_.correction, missionPhase_,
+           static_cast<int>(detectedCamera_));
   server.send(200, "application/json", buf);
 }
 
@@ -293,5 +327,13 @@ void TelemetryServer::handleDrive() {
                 drive_.running ? 1 : 0, drive_.leftBaseSpeed,
                 drive_.rightBaseSpeed);
 
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void TelemetryServer::handleVision() {
+  const String body = server.arg("plain");
+  const bool start = parseJsonBool(body, "start", true);
+  visionCommand_ = start ? VisionCommand::Start : VisionCommand::Stop;
+  Serial.printf("[VISION] web request: %s\n", start ? "start" : "stop");
   server.send(200, "application/json", "{\"ok\":true}");
 }

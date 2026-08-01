@@ -2,12 +2,13 @@
 
 #include <Arduino.h>
 
-// SSD1306 OLED — shows reflectance analog readings and on/off tape state.
+// SSD1306 OLED — reflectance readings, or teletubby detect status.
 
 class ReflectanceDisplay {
  public:
   void begin();
   void showReadings(int leftAvg, int rightAvg, bool leftOnTape, bool rightOnTape);
+  void showTeletubbyDetected(int8_t camera);
 
  private:
   static constexpr uint32_t kMinUpdateMs = 50;  // limit I2C refresh rate

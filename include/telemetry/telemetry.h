@@ -17,19 +17,26 @@ struct DriveSettings {
   float maxSpeed = 150.0f;
 };
 
+// Pending web request for the Pi vision search, consumed by the main loop.
+enum class VisionCommand : uint8_t { None, Start, Stop };
+
 class TelemetryServer {
  public:
   void begin(TapeFollowPid& pid, MotorDriver& motors);
   void updateSnapshot(const TelemetrySnapshot& snapshot);
+  void updateMissionStatus(const char* phaseName, int8_t detectedCamera);
   void poll();
 
   const DriveSettings& drive() const { return drive_; }
+
+  VisionCommand takeVisionCommand();
 
  private:
   void handleRoot();
   void handleStatus();
   void handlePid();
   void handleDrive();
+  void handleVision();
 
   static float parseJsonFloat(const String& body, const char* key,
                               float fallback);
@@ -39,4 +46,7 @@ class TelemetryServer {
   MotorDriver* motors_ = nullptr;
   TelemetrySnapshot snapshot_{};
   DriveSettings drive_{};
+  VisionCommand visionCommand_ = VisionCommand::None;
+  const char* missionPhase_ = "Idle";
+  int8_t detectedCamera_ = -1;
 };

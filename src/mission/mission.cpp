@@ -5,6 +5,7 @@
 void MissionController::begin(VisionInference& vision) {
   vision_ = &vision;
   phase_ = MissionPhase::Idle;
+  lastDetectedCamera_ = -1;
   setStop();
 }
 
@@ -13,6 +14,7 @@ void MissionController::start() {
     return;
   }
   Serial.println("[MISSION] start -> SearchTeletubby");
+  lastDetectedCamera_ = -1;
   phase_ = MissionPhase::SearchTeletubby;
   vision_->enable(true);
   setTapeFollow();
@@ -24,6 +26,7 @@ void MissionController::abort() {
     vision_->enable(false);
     vision_->clearInject();
   }
+  lastDetectedCamera_ = -1;
   phase_ = MissionPhase::Idle;
   setStop();
 }
@@ -48,8 +51,11 @@ void MissionController::update() {
     case MissionPhase::SearchTeletubby: {
       const VisionDetectResult vision = vision_->poll();
       if (vision.found) {
-        Serial.printf("[MISSION] teletubby DETECT — stop %lu ms, START LOW\n",
-                      static_cast<unsigned long>(MissionConfig::kTeletubbyStopMs));
+        lastDetectedCamera_ = vision.camera;
+        Serial.printf(
+            "[MISSION] teletubby DETECT cam%d — stop %lu ms, Pi cooldown\n",
+            static_cast<int>(vision.camera),
+            static_cast<unsigned long>(MissionConfig::kTeletubbyStopMs));
         vision_->clearInject();
         vision_->enable(false);
         phase_ = MissionPhase::PauseOnDetect;
