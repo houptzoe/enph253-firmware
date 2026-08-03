@@ -31,8 +31,10 @@ void ReflectanceDisplay::begin() {
   display.display();
 }
 
-void ReflectanceDisplay::showReadings(int leftAvg, int rightAvg, bool leftOnTape,
-                                      bool rightOnTape) {
+void ReflectanceDisplay::showStatus(float leftHz, float rightHz,
+                                    float baselineLeft, float baselineRight,
+                                    bool metalLeftHit, bool metalRightHit,
+                                    bool leftOnTape, bool rightOnTape) {
   const uint32_t nowMs = millis();
   if (nowMs - lastUpdateMs_ < kMinUpdateMs) {
     return;
@@ -44,28 +46,54 @@ void ReflectanceDisplay::showReadings(int leftAvg, int rightAvg, bool leftOnTape
   display.setTextColor(SSD1306_WHITE);
 
   display.setCursor(0, 0);
-  display.println(F("Reflectance"));
+  display.printf("Freq L:%.0f", leftHz);
+  display.setCursor(0, 10);
+  display.printf("Freq R:%.0f", rightHz);
 
-  display.setCursor(0, 16);
-  display.printf("L analog: %4d", leftAvg);
-  display.setCursor(0, 28);
-  display.printf("L digital: %s", leftOnTape ? "ON " : "OFF");
+  display.setCursor(0, 22);
+  display.printf("Base L:%.0f R:%.0f", baselineLeft, baselineRight);
 
-  display.setCursor(0, 44);
-  display.printf("R analog: %4d", rightAvg);
-  display.setCursor(0, 56);
-  display.printf("R digital: %s", rightOnTape ? "ON " : "OFF");
+  display.setCursor(0, 34);
+  display.print(F("Metal: "));
+  if (metalLeftHit && metalRightHit) {
+    display.print(F("L R"));
+  } else if (metalLeftHit) {
+    display.print(F("L"));
+  } else if (metalRightHit) {
+    display.print(F("R"));
+  } else {
+    display.print(F("-"));
+  }
+
+  display.setCursor(0, 46);
+  display.printf("Tape L:%s R:%s", leftOnTape ? "ON " : "OFF",
+                 rightOnTape ? "ON" : "OFF");
+
+  display.display();
+}
+
+void ReflectanceDisplay::showMetalHit(char side, float baselineHz, float deltaHz) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setCursor(0, 0);
+  display.printf("Metal hit: %c", side);
+  display.setCursor(0, 12);
+  display.printf("Baseline: %.0f Hz", baselineHz);
+  display.setCursor(0, 24);
+  display.printf("Delta: %.0f Hz", deltaHz);
 
   display.display();
 }
 
 void ReflectanceDisplay::showMessage(const char* line1, const char* line2) {
   display.clearDisplay();
-  display.setTextSize(2);
+  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
   display.setCursor(0, 0);
   display.println(line1);
-  display.setCursor(0, 20);
+  display.setCursor(0, 12);
   display.println(line2);
   display.display();
 }

@@ -46,8 +46,10 @@ static void initMetalDetector() {
   MetalDetectorConfig config;
   config.leftPin = kMetalDetectorLeftPin;
   config.rightPin = kMetalDetectorRightPin;
-  config.gateTimeMs = 100;      // Tune on hardware.
-  config.thresholdHz = 3000.0f;  // Tune on hardware.
+  config.gateTimeMs = 100;              // Tune on hardware.
+  config.thresholdLeftHz = 500.0f;      // Tune on hardware.
+  config.thresholdRightHz = 500.0f;     // Tune on hardware.
+  config.baselineDurationMs = 3000;     // 3 s no-metal baseline at boot.
   metalDetector.begin(config);
 }
 
@@ -61,6 +63,17 @@ static void initArm() {
 // ---------------------------------------------------------------------------
 
 static void runLineFollowing() {
+  // Cached so OLED can refresh from either tape or metal updates.
+  static bool leftOnTape = false;
+  static bool rightOnTape = false;
+  static float leftHz = 0.0f;
+  static float rightHz = 0.0f;
+  static float baselineLeft = 0.0f;
+  static float baselineRight = 0.0f;
+  static bool metalLeftHit = false;
+  static bool metalRightHit = false;
+  static bool oledDirty = false;
+
   TapeFollowState state;
   if (tapeFollow.update(state)) {
     const DriveSettings& drive = telemetry.drive();
@@ -78,8 +91,9 @@ static void runLineFollowing() {
       motors.stop();
     }
 
-    reflectanceDisplay.showReadings(state.leftAvg, state.rightAvg,
-                                    state.leftOnTape, state.rightOnTape);
+    leftOnTape = state.leftOnTape;
+    rightOnTape = state.rightOnTape;
+    oledDirty = true;
 
     TelemetrySnapshot snap;
     snap.error = state.error;
@@ -98,22 +112,40 @@ static void runLineFollowing() {
     }
   }
 
-  // Only chase metal hits while actually driving a run — avoids the arm
-  // firing while the robot is parked/idle on the telemetry page.
+  // Refresh metal fields every gate; only start a pickup while driving.
   MetalDetectorState metalState;
-  if (metalDetector.update(metalState) && telemetry.drive().running) {
-    if (metalState.side != MetalSide::None) {
-      Serial.printf("[METAL] hit side:%d L:%.0f(%.0f) R:%.0f(%.0f)\n",
-                    static_cast<int>(metalState.side), metalState.leftHz,
-                    metalState.baselineLeft, metalState.rightHz,
-                    metalState.baselineRight);
+  if (metalDetector.update(metalState)) {
+    leftHz = metalState.leftHz;
+    rightHz = metalState.rightHz;
+    baselineLeft = metalState.baselineLeft;
+    baselineRight = metalState.baselineRight;
+    metalLeftHit = metalState.leftHit;
+    metalRightHit = metalState.rightHit;
+    oledDirty = true;
+
+    if (telemetry.drive().running && metalState.side != MetalSide::None) {
+      const bool left = metalState.side == MetalSide::Left;
+      const float baselineHz =
+          left ? metalState.baselineLeft : metalState.baselineRight;
+      const float deltaHz =
+          left ? metalState.deltaLeftHz : metalState.deltaRightHz;
+      const float freqHz = left ? metalState.leftHz : metalState.rightHz;
+
+      Serial.printf("[METAL] hit %c freq:%.0f baseline:%.0f delta:%.0f Hz\n",
+                    left ? 'L' : 'R', freqHz, baselineHz, deltaHz);
       motors.stop();
       arm.startPickup(metalState.side);
       mode = RobotMode::PickingUp;
-      reflectanceDisplay.showMessage(
-          "Metal hit!", metalState.side == MetalSide::Left ? "Side: LEFT"
-                                                             : "Side: RIGHT");
+      reflectanceDisplay.showMetalHit(left ? 'L' : 'R', baselineHz, deltaHz);
+      return;
     }
+  }
+
+  if (oledDirty) {
+    oledDirty = false;
+    reflectanceDisplay.showStatus(leftHz, rightHz, baselineLeft, baselineRight,
+                                  metalLeftHit, metalRightHit, leftOnTape,
+                                  rightOnTape);
   }
 }
 
@@ -141,7 +173,7 @@ static void runPickingUp() {
   if (phase != lastShownPhase) {
     lastShownPhase = phase;
     Serial.printf("[ARM] phase: %s\n", phaseName(phase));
-    reflectanceDisplay.showMessage("Picking up...", phaseName(phase));
+    // OLED left on the metal-hit screen (baseline + delta) while the arm moves.
   }
 
   if (done) {
@@ -168,15 +200,18 @@ void setup() {
   telemetry.begin(tapeFollow, motors);
 
   motors.begin();
+  motors.stop();  // stay still through baseline capture
   reflectanceDisplay.begin();
   initTapeFollow();
   initMetalDetector();
   initArm();
 
   // Metal-detector baseline must be taken with the robot stationary and away
-  // from any metal target. Blocking (~calibrationSamples * gateTimeMs).
-  reflectanceDisplay.showMessage("Calibrating", "metal detector...");
+  // from any metal target. Blocks for baselineDurationMs (~3 s) before any
+  // hit detection or line following can run — motors stay stopped the whole time.
+  reflectanceDisplay.showMessage("Baseline 3s", "stand still");
   metalDetector.calibrate();
+  reflectanceDisplay.showMessage("Baseline OK", "ready to drive");
 
   mode = RobotMode::LineFollowing;
 }
