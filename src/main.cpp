@@ -25,9 +25,9 @@ static void initTapeFollow() {
   // Slower sampler so SoftAP beacons are not starved on CPU0 (was 500 us).
   config.samplePeriodUs = 2000;
   config.samplesPerUpdate = 5;  // still ~100 Hz control
-  config.kp = 35.0f;
+  config.kp = 45.0f;
   config.ki = 0.0f;
-  config.kd = 12.0f;
+  config.kd = 10.0f;
   config.integralMax = 10.0f;
   tapeFollow.begin(config);
 }
@@ -37,6 +37,23 @@ static void initTapeFollow() {
 // ---------------------------------------------------------------------------
 
 void setup() {
+  
+  pinMode(kRotationDirPin, OUTPUT);
+  pinMode(kRotationStepPin, OUTPUT);
+  pinMode(kVerticalDirPin, OUTPUT);
+  pinMode(kVerticalStepPin, OUTPUT);
+  pinMode(kHorizontalDirPin, OUTPUT);
+  pinMode(kHorizontalStepPin, OUTPUT);
+  pinMode(kSwitch0Pin, INPUT_PULLUP);
+  pinMode(kSwitch1Pin, INPUT_PULLUP);
+
+  digitalWrite(kRotationStepPin, LOW);
+  digitalWrite(kRotationDirPin, LOW);
+  digitalWrite(kVerticalStepPin, LOW);
+  digitalWrite(kVerticalDirPin, LOW);
+  digitalWrite(kHorizontalDirPin, LOW);
+  digitalWrite(kHorizontalStepPin, LOW);
+  
   Serial.begin(115200);
   delay(500);  // USB-CDC ready before we log SoftAP status
 

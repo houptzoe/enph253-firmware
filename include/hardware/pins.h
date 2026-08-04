@@ -41,8 +41,8 @@ constexpr int kLedRightPin = 17;
 
 // IMU (MPU6050) — dedicated I2C bus (Wire), separate from OLED.
 // Uses freed GPIO 12 + spare GPIO 18 so it never shares reflectance or OLED pins.
-constexpr int kImuSdaPin = 12;
-constexpr int kImuSclPin = 18;
+constexpr int kImuSdaPin = 8;
+constexpr int kImuSclPin = 9;
 
 // Stepper motors (DIR + STEP each): rotation, vertical, horizontal
 constexpr int kRotationDirPin = 21;
