@@ -45,7 +45,6 @@ void setup() {
   pinMode(kHorizontalDirPin, OUTPUT);
   pinMode(kHorizontalStepPin, OUTPUT);
   pinMode(kSwitch0Pin, INPUT_PULLUP);
-  pinMode(kSwitch1Pin, INPUT_PULLUP);
 
   digitalWrite(kRotationStepPin, LOW);
   digitalWrite(kRotationDirPin, LOW);
