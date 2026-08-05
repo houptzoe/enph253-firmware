@@ -179,9 +179,9 @@
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_hw_support/include/soc/esp32/spiram.h \
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
- include/arm/arm.h \
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src/Wire.h \
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal.h \
+ include/arm/arm.h \
  .pio/libdeps/esp32-s3-devkitm-1/Adafruit\ GFX\ Library/Adafruit_GFX.h \
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/cores/esp32/Print.h \
  .pio/libdeps/esp32-s3-devkitm-1/Adafruit\ GFX\ Library/gfxfont.h \
@@ -196,4 +196,5 @@
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/driver/include/driver/mcpwm.h \
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/mcpwm_types.h \
  include/hardware/pins.h include/metal/metal.h include/display/display.h \
- include/motor/motor.h include/pid/pid.h include/telemetry/telemetry.h
+ include/motor/motor.h include/pid/pid.h include/sensors/imu.h \
+ include/sonar/sonar.h include/telemetry/telemetry.h

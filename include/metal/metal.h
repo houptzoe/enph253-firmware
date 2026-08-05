@@ -15,8 +15,9 @@ struct MetalDetectorConfig {
   int leftPin = kMetalDetectorLeftPin;
   int rightPin = kMetalDetectorRightPin;
   uint32_t gateTimeMs = 100;             // measurement window per reading
-  float thresholdLeftHz = 500.0f;        // |delta from baseline| for left hit
-  float thresholdRightHz = 500.0f;       // |delta from baseline| for right hit
+  float thresholdLeftHz = 400.0f;        // freq rise above baseline for left hit
+  float thresholdRightHz = 400.0f;       // freq rise above baseline for right hit
+  bool enableRightDetector = true;       // right coil enabled
   uint32_t baselineDurationMs = 3000;  // no-metal averaging window at boot
 };
 
@@ -26,8 +27,8 @@ struct MetalDetectorState {
   float rightHz = 0.0f;
   float baselineLeft = 0.0f;
   float baselineRight = 0.0f;
-  float deltaLeftHz = 0.0f;   // |leftHz - baselineLeft|
-  float deltaRightHz = 0.0f;  // |rightHz - baselineRight|
+  float deltaLeftHz = 0.0f;   // max(0, leftHz - baselineLeft)
+  float deltaRightHz = 0.0f;  // max(0, rightHz - baselineRight)
   bool leftHit = false;
   bool rightHit = false;
   MetalSide side = MetalSide::None;  // preferred side when either/both hit

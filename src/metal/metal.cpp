@@ -163,15 +163,19 @@ bool MetalDetector::update(MetalDetectorState& state) {
   state_.leftHz = countsToHz(countL, elapsedUs);
   state_.rightHz = countsToHz(countR, elapsedUs);
 
-  const float deltaL = fabsf(state_.leftHz - state_.baselineLeft);
-  const float deltaR = fabsf(state_.rightHz - state_.baselineRight);
-  state_.deltaLeftHz = deltaL;
-  state_.deltaRightHz = deltaR;
-  state_.leftHit = deltaL > config_.thresholdLeftHz;
-  state_.rightHit = deltaR > config_.thresholdRightHz;
+  // Hits only on a frequency rise above baseline (drops are ignored).
+  const float deltaL = state_.leftHz - state_.baselineLeft;
+  const float deltaR = state_.rightHz - state_.baselineRight;
+  state_.deltaLeftHz = deltaL > 0.0f ? deltaL : 0.0f;
+  state_.deltaRightHz = deltaR > 0.0f ? deltaR : 0.0f;
+  state_.leftHit = state_.deltaLeftHz > config_.thresholdLeftHz;
+  // Right coil temporarily ignored — still measured for OLED, never triggers.
+  state_.rightHit = config_.enableRightDetector &&
+                    (state_.deltaRightHz > config_.thresholdRightHz);
 
   if (state_.leftHit && state_.rightHit) {
-    state_.side = (deltaL >= deltaR) ? MetalSide::Left : MetalSide::Right;
+    state_.side = (state_.deltaLeftHz >= state_.deltaRightHz) ? MetalSide::Left
+                                                              : MetalSide::Right;
   } else if (state_.leftHit) {
     state_.side = MetalSide::Left;
   } else if (state_.rightHit) {

@@ -12,8 +12,8 @@ struct TelemetrySnapshot {
 
 struct DriveSettings {
   bool running = true;  // motors off until Start is pressed
-  float leftBaseSpeed = 80.0f;
-  float rightBaseSpeed = 80.0f;
+  float leftBaseSpeed = 90.0f;
+  float rightBaseSpeed = 90.0f;
   float maxSpeed = 150.0f;
 };
 

@@ -18,8 +18,11 @@ constexpr int kRightMotorPwm1Pin = 6;
 
 // IR detector — GPIO 7 (ADC1_CH6)
 constexpr int kIrDetectorPin = 7;
+constexpr int kIrSwitchPin = 18; 
 
-// Spare ADC1 inputs — GPIO 8 (ADC1_CH7), GPIO 9 (ADC1_CH8). Unassigned.
+// HC-SR04 ultrasonic — trigger GPIO 8, echo GPIO 9
+constexpr int kSonarTrigPin = 8;
+constexpr int kSonarEchoPin = 9;
 
 // Pi ↔ ESP handshake (see src/sensors/pi-handshake.md when present).
 // START out (ESP→Pi rising edge): GPIO 10
@@ -31,8 +34,7 @@ constexpr int kPiDetectPin = 11;
 constexpr int kMetalDetectorLeftPin = 13;
 constexpr int kMetalDetectorRightPin = 14;
 
-// Switches — GPIO 15, 41
-constexpr int kSwitch1Pin = 15;
+// Limit switch — GPIO 41
 constexpr int kSwitch0Pin = 41;
 
 // Status LEDs — GPIO 16, 17
@@ -42,7 +44,7 @@ constexpr int kLedRightPin = 17;
 // IMU (MPU6050) — dedicated I2C bus (Wire), separate from OLED.
 // Uses freed GPIO 12 + spare GPIO 18 so it never shares reflectance or OLED pins.
 constexpr int kImuSdaPin = 12;
-constexpr int kImuSclPin = 18;
+constexpr int kImuSclPin = 15;
 
 // Stepper motors (DIR + STEP each): rotation, vertical, horizontal
 constexpr int kRotationDirPin = 21;
@@ -59,4 +61,4 @@ constexpr int kServoMotorPin = 42;
 constexpr int kOledSclPin = 45;
 constexpr int kOledSdaPin = 46;
 
-// Spare ADC1: GPIO 8, 9. Do not reuse any GPIO listed above.
+// Do not reuse any GPIO listed above.
