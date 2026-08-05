@@ -72,6 +72,23 @@ static void pollSerialCommands() {
 // ---------------------------------------------------------------------------
 
 void setup() {
+  
+  pinMode(kRotationDirPin, OUTPUT);
+  pinMode(kRotationStepPin, OUTPUT);
+  pinMode(kVerticalDirPin, OUTPUT);
+  pinMode(kVerticalStepPin, OUTPUT);
+  pinMode(kHorizontalDirPin, OUTPUT);
+  pinMode(kHorizontalStepPin, OUTPUT);
+  pinMode(kSwitch0Pin, INPUT_PULLUP);
+  pinMode(kSwitch1Pin, INPUT_PULLUP);
+
+  digitalWrite(kRotationStepPin, LOW);
+  digitalWrite(kRotationDirPin, LOW);
+  digitalWrite(kVerticalStepPin, LOW);
+  digitalWrite(kVerticalDirPin, LOW);
+  digitalWrite(kHorizontalDirPin, LOW);
+  digitalWrite(kHorizontalStepPin, LOW);
+  
   Serial.begin(115200);
   delay(500);  // USB-CDC ready before we log SoftAP status
 
