@@ -149,9 +149,7 @@ void PickupArm::startPickup(MetalSide side) {
   initialExtendSteps_ = 0;
   rotateStepsTaken_ = 0;
   stowRaiseSteps_ = 0;
-  // Tune series ends with full stow + open gripper.
-  tuneFixedExtendPending_ = config_.tuneMode;
-  phase_ = config_.tuneMode ? PickupPhase::Extend : PickupPhase::SetupRaise;
+  phase_ = PickupPhase::InitialExtend;
 }
 
 bool PickupArm::update(PickupPhase& phaseOut) {
@@ -160,67 +158,40 @@ bool PickupArm::update(PickupPhase& phaseOut) {
     case PickupPhase::Done:
       break;
 
-    case PickupPhase::SetupRaise:
+    case PickupPhase::InitialExtend:
       setGripperOpen();
-      stepAxis(config_.verticalStepPin, config_.verticalDirPin,
-                config_.raiseDirUp, config_.setupRaiseSteps,
-                config_.verticalStepDelayUs);
-      phase_ = PickupPhase::SetupRotate;
+      stepAxis(config_.horizontalStepPin, config_.horizontalDirPin,
+                config_.extendDirOut, config_.initialExtendSteps,
+                config_.horizontalStepDelayUs);
+      extendStepsTaken_ += config_.initialExtendSteps;
+      initialExtendSteps_ = config_.initialExtendSteps;
+      phase_ = PickupPhase::Rotate;
       break;
 
-    case PickupPhase::SetupRotate: {
+    case PickupPhase::Rotate: {
       const bool dir = (side_ == MetalSide::Left) ? config_.rotateDirLeft
                                                     : config_.rotateDirRight;
-      const int steps = config_.tuneMode
-                            ? config_.tuneRotateSteps
-                            : ((side_ == MetalSide::Left)
-                                   ? config_.setupRotateStepsLeft
-                                   : config_.setupRotateStepsRight);
-      Serial.printf("[ARM] SetupRotate side=%s dir=%d\n",
+      Serial.printf("[ARM] Rotate side=%s dir=%d\n",
                     (side_ == MetalSide::Left)    ? "L"
                     : (side_ == MetalSide::Right) ? "R"
                                                   : "?",
                     dir ? 1 : 0);
-      stepAxis(config_.rotationStepPin, config_.rotationDirPin, dir, steps,
-                config_.rotationStepDelayUs);
-      rotateStepsTaken_ += steps;
-      phase_ = config_.tuneMode ? PickupPhase::SetupLower
-                                : PickupPhase::SetupExtend;
+      stepAxis(config_.rotationStepPin, config_.rotationDirPin, dir,
+                config_.rotateSteps, config_.rotationStepDelayUs);
+      rotateStepsTaken_ += config_.rotateSteps;
+      phase_ = PickupPhase::Lower;
       break;
     }
 
-    case PickupPhase::SetupExtend:
-      stepAxis(config_.horizontalStepPin, config_.horizontalDirPin,
-                config_.extendDirOut, config_.setupExtendSteps,
-                config_.horizontalStepDelayUs);
-      extendStepsTaken_ += config_.setupExtendSteps;
-      initialExtendSteps_ = config_.setupExtendSteps;
-      phase_ = PickupPhase::SetupLower;
-      break;
-
-    case PickupPhase::SetupLower: {
-      const int steps =
-          config_.tuneMode ? config_.tuneLowerSteps : config_.setupLowerSteps;
-      const int pulseUs = config_.tuneMode ? config_.tuneLowerStepDelayUs
-                                             : config_.verticalStepDelayUs;
+    case PickupPhase::Lower:
       stepAxis(config_.verticalStepPin, config_.verticalDirPin,
-                config_.lowerDirDown, steps, pulseUs);
-      if (config_.tuneMode) {
-        stowRaiseSteps_ = config_.tuneRaiseSteps;
-        phase_ = PickupPhase::RotateScan;
-        break;
-      }
-      // Net drop from start = setupLower - setupRaise; stow by raising that.
-      stowRaiseSteps_ = config_.setupLowerSteps - config_.setupRaiseSteps;
-      if (stowRaiseSteps_ < 0) {
-        stowRaiseSteps_ = 0;
-      }
+                config_.lowerDirDown, config_.lowerSteps,
+                config_.verticalStepDelayUs);
+      stowRaiseSteps_ = config_.raiseSteps;
       phase_ = PickupPhase::RotateScan;
       break;
-    }
 
     case PickupPhase::RotateScan: {
-      // Same yaw dir as SetupRotate for this side.
       const bool dir = (side_ == MetalSide::Left) ? config_.rotateDirLeft
                                                     : config_.rotateDirRight;
       Serial.printf("[ARM] RotateScan side=%s dir=%d\n",
@@ -235,7 +206,6 @@ bool PickupArm::update(PickupPhase& phaseOut) {
     }
 
     case PickupPhase::PostScanYawAdjust: {
-      // Metal vs sonar offset: continue in the same side yaw for both L and R.
       const bool dir = (side_ == MetalSide::Left) ? config_.rotateDirLeft
                                                     : config_.rotateDirRight;
       const int steps =
@@ -247,74 +217,50 @@ bool PickupArm::update(PickupPhase& phaseOut) {
       break;
     }
 
-    case PickupPhase::Extend:
-      if (config_.tuneMode && tuneFixedExtendPending_) {
-        // Initial fixed-step extend for tuning — then rotate/lower/scan.
-        tuneFixedExtendPending_ = false;
-        stepAxis(config_.horizontalStepPin, config_.horizontalDirPin,
-                  config_.extendDirOut, config_.tuneExtendSteps,
-                  config_.horizontalStepDelayUs);
-        extendStepsTaken_ += config_.tuneExtendSteps;
-        initialExtendSteps_ = config_.tuneExtendSteps;
-        phase_ = PickupPhase::SetupRotate;
-        break;
+    case PickupPhase::Extend: {
+      const int remaining = config_.maxExtendSteps - extendStepsTaken_;
+      if (remaining > 0) {
+        extendStepsTaken_ += extendUntilStop(remaining);
       }
-      // Remaining budget from home; stop early on microswitch.
-      {
-        const int remaining = config_.maxExtendSteps - extendStepsTaken_;
-        if (remaining > 0) {
-          extendStepsTaken_ += extendUntilStop(remaining);
-        }
-        Serial.printf("[ARM] extend done total=%d / max=%d\n", extendStepsTaken_,
-                      config_.maxExtendSteps);
-      }
+      Serial.printf("[ARM] extend done total=%d / max=%d\n", extendStepsTaken_,
+                    config_.maxExtendSteps);
       phase_ = PickupPhase::Grip;
       break;
+    }
 
     case PickupPhase::Grip:
-      // Close after extend stopped (switch or max from home).
       setGripperClosed();
-      delay(500);  // let the servo finish closing before moving the arm
+      delay(500);
       phase_ = PickupPhase::Retract;
       break;
 
     case PickupPhase::Retract: {
-      // Retract grab reach (everything beyond the initial/home extend).
-      // Full sequence has no separate initial retract — undo all at once.
-      const int grabSteps = config_.tuneMode
-                                ? (extendStepsTaken_ - initialExtendSteps_)
-                                : extendStepsTaken_;
+      const int grabSteps = extendStepsTaken_ - initialExtendSteps_;
       if (grabSteps > 0) {
         stepAxis(config_.horizontalStepPin, config_.horizontalDirPin,
                   config_.retractDirIn, grabSteps,
                   config_.horizontalStepDelayUs);
       }
-      if (!config_.tuneMode) {
-        extendStepsTaken_ = 0;
-        initialExtendSteps_ = 0;
-      }
       phase_ = PickupPhase::Raise;
       break;
     }
 
-    case PickupPhase::Raise: {
-      const int pulseUs = config_.tuneMode ? config_.tuneLowerStepDelayUs
-                                             : config_.verticalStepDelayUs;
+    case PickupPhase::Raise:
       stepAxis(config_.verticalStepPin, config_.verticalDirPin,
-                config_.raiseDirUp, stowRaiseSteps_, pulseUs);
+                config_.raiseDirUp, stowRaiseSteps_,
+                config_.verticalStepDelayUs);
       phase_ = PickupPhase::Recenter;
       break;
-    }
 
     case PickupPhase::Recenter: {
-      // Undo yaw after raise. Tune: Left 1/4 of total, Right 5/8; full: all.
       const bool dir = (side_ == MetalSide::Left) ? config_.rotateDirRight
                                                     : config_.rotateDirLeft;
-      int steps = rotateStepsTaken_;
-      if (config_.tuneMode) {
-        steps = (side_ == MetalSide::Left) ? (rotateStepsTaken_ / 4)
-                                           : ((rotateStepsTaken_ * 5) / 8);
-      }
+      const int steps =
+          (side_ == MetalSide::Left)
+              ? (rotateStepsTaken_ * config_.recenterLeftNum) /
+                    config_.recenterLeftDen
+              : (rotateStepsTaken_ * config_.recenterRightNum) /
+                    config_.recenterRightDen;
       if (steps > 0) {
         stepAxis(config_.rotationStepPin, config_.rotationDirPin, dir, steps,
                   config_.rotationStepDelayUs);
@@ -322,13 +268,11 @@ bool PickupArm::update(PickupPhase& phaseOut) {
       Serial.printf("[ARM] recenter %d / %d yaw steps\n", steps,
                     rotateStepsTaken_);
       rotateStepsTaken_ = 0;
-      phase_ = config_.tuneMode ? PickupPhase::RetractInitial
-                                : PickupPhase::OpenGrip;
+      phase_ = PickupPhase::RetractInitial;
       break;
     }
 
     case PickupPhase::RetractInitial:
-      // Undo the first extend after yaw is home again.
       if (initialExtendSteps_ > 0) {
         stepAxis(config_.horizontalStepPin, config_.horizontalDirPin,
                   config_.retractDirIn, initialExtendSteps_,
@@ -340,9 +284,9 @@ bool PickupArm::update(PickupPhase& phaseOut) {
       break;
 
     case PickupPhase::OpenGrip:
-      delay(1000);  // settle before releasing
+      delay(1000);
       setGripperOpen();
-      delay(300);  // let the servo finish opening
+      delay(300);
       phase_ = PickupPhase::Done;
       break;
   }

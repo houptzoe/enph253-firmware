@@ -24,7 +24,7 @@ static PickupArm arm;
 static UltrasonicSonar sonar;
 static ImuTracker imu;
 
-enum class RobotMode { LineFollowing, ApproachAfterMetal, PickingUp, Halted };
+enum class RobotMode { LineFollowing, ApproachAfterMetal, PickingUp };
 static RobotMode mode = RobotMode::LineFollowing;
 
 static bool imuReady = false;
@@ -107,35 +107,30 @@ static void initMetalDetector() {
 static void initArm() {
   PickupArmConfig config;  // defaults pull pins/steps from pins.h
 
-  // Gripper angles — always applied (tune and full sequence).
   config.servoOpenDeg = 110;
   config.servoClosedDeg = 180;
 
-  // Per-side yaw for SetupRotate and RotateScan (must match each other).
+  // Per-side yaw for Rotate and RotateScan (must match each other).
   config.rotateDirLeft = false;
   config.rotateDirRight = true;
 
-  // Tune series after metal through stow + open gripper.
-  // Set tuneMode false for full pickup.
-  config.tuneMode = true;
-  config.tuneExtendSteps = 200;
-  config.tuneRotateSteps = 280;
-  config.tuneLowerSteps = 5000;
-  config.tuneRaiseSteps = 5500;
-  config.tuneLowerStepDelayUs = 1000;
-  config.maxExtendSteps = 300;  // total horizontal steps from home (incl. first extend)
-
-  // Setup-from-stow — tune on hardware (used when tuneMode is false).
-  config.setupRaiseSteps = 300;
-  config.setupRotateStepsLeft = 400;
-  config.setupRotateStepsRight = 400;
-  config.setupExtendSteps = 80;
-  config.setupLowerSteps = 2300;
-  // Sonar lock window while rotating at rock level — tune on hardware.
+  // Primary pickup sequence (tuned on hardware) — both L and R metal hits.
+  config.initialExtendSteps = 200;
+  config.rotateSteps = 280;
+  config.lowerSteps = 5000;
+  config.raiseSteps = 5500;
+  config.verticalStepDelayUs = 1000;
+  config.maxExtendSteps = 300;  // total horizontal from home (incl. first extend)
   config.sonarDetectMaxCm = 20.0f;
   config.sonarDetectMinCm = 4.0f;
-  config.postScanYawAdjustMs = 500;  // metal vs sonar center offset
+  config.postScanYawAdjustMs = 500;
   config.rotateScanMaxSteps = 1200;
+  // Recenter: Left 1/4, Right 5/8 of total yaw.
+  config.recenterLeftNum = 1;
+  config.recenterLeftDen = 4;
+  config.recenterRightNum = 5;
+  config.recenterRightDen = 8;
+
   arm.begin(config, &sonar, &reflectanceDisplay);
 }
 
@@ -282,21 +277,20 @@ static void runLineFollowing() {
 
 static const char* phaseName(PickupPhase phase) {
   switch (phase) {
-    case PickupPhase::SetupRaise:   return "SetupRaise";
-    case PickupPhase::SetupRotate:  return "SetupRotate";
-    case PickupPhase::SetupExtend:  return "SetupExtend";
-    case PickupPhase::SetupLower:   return "SetupLower";
-    case PickupPhase::RotateScan:   return "RotateScan";
+    case PickupPhase::InitialExtend: return "InitialExtend";
+    case PickupPhase::Rotate:        return "Rotate";
+    case PickupPhase::Lower:         return "Lower";
+    case PickupPhase::RotateScan:    return "RotateScan";
     case PickupPhase::PostScanYawAdjust: return "PostScanYaw";
-    case PickupPhase::Extend:       return "Extend";
-    case PickupPhase::Grip:         return "Grip";
-    case PickupPhase::Retract:      return "Retract";
-    case PickupPhase::Raise:        return "Raise";
-    case PickupPhase::Recenter:     return "Recenter";
+    case PickupPhase::Extend:        return "Extend";
+    case PickupPhase::Grip:          return "Grip";
+    case PickupPhase::Retract:       return "Retract";
+    case PickupPhase::Raise:         return "Raise";
+    case PickupPhase::Recenter:      return "Recenter";
     case PickupPhase::RetractInitial: return "RetractInit";
-    case PickupPhase::OpenGrip:     return "OpenGrip";
-    case PickupPhase::Done:         return "Done";
-    default:                        return "Idle";
+    case PickupPhase::OpenGrip:      return "OpenGrip";
+    case PickupPhase::Done:          return "Done";
+    default:                         return "Idle";
   }
 }
 
@@ -343,12 +337,6 @@ static void runPickingUp() {
   updateImuTurnTracking();
 
   if (done) {
-    if (arm.isTuneMode()) {
-      Serial.println(F("[ARM] tune series done — halted (power-cycle to retry)"));
-      lastShownPhase = PickupPhase::Idle;
-      mode = RobotMode::Halted;
-      return;
-    }
     Serial.println("[ARM] pickup complete, resuming line following");
     tapeFollow.reset();  // clear any PID windup accumulated while paused
     lastShownPhase = PickupPhase::Idle;
@@ -396,11 +384,8 @@ void loop() {
     runLineFollowing();
   } else if (mode == RobotMode::ApproachAfterMetal) {
     runApproachAfterMetal();
-  } else if (mode == RobotMode::PickingUp) {
-    runPickingUp();
   } else {
-    // Halted after tune series — stay stopped until power cycle.
-    motors.stop();
+    runPickingUp();
   }
 
   telemetry.poll();

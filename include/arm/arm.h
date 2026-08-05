@@ -14,14 +14,9 @@ class ReflectanceDisplay;
 // Pickup arm — three stepper axes (rotate, vertical, horizontal-extend) plus
 // a servo gripper.
 //
-// After a metal hit (full sequence when tuneMode is false):
-//   1) Setup from stow: raise a little, rotate toward the hit side, extend a
-//      little, then lower to rock level.
-//   2) RotateScan until HC-SR04 sees an object, then extend/grab/stow.
-//
-// When tuneMode is true, runs Extend → Rotate → Lower → RotateScan →
-// yaw-adjust → extend-until-switch → grip → retract grab → raise →
-// recenter → retract initial extend → open grip, then Done.
+// After a metal hit (left or right):
+//   Extend → Rotate → Lower → RotateScan → post-scan yaw → extend-to-switch →
+//   grip → retract grab → raise → recenter → retract initial → open grip.
 //
 // Each call to update() advances exactly one phase. Phases themselves are
 // short blocking step trains, so call update() repeatedly from the main loop.
@@ -37,35 +32,29 @@ struct PickupArmConfig {
   int switch0Pin = kSwitch0Pin;
   int servoPin = kServoMotorPin;
 
-  // One-move-at-a-time tuning. When true, runs Extend → Rotate → Lower →
-  // RotateScan → extend-until-switch, then Done (full sequence skipped).
-  bool tuneMode = false;
-  int tuneExtendSteps = 200;
-  int tuneRotateSteps = 280;  // toward the metal-hit side
-  int tuneLowerSteps = 5000;
-  int tuneRaiseSteps = 5500;  // stow raise after grab (may exceed lower)
-  int tuneLowerStepDelayUs = 1000;  // lower axis pulse delay in tuneMode
-
-  // Setup-from-stow step counts — tune on hardware.
-  int setupRaiseSteps = 300;         // small lift off the starting pose
-  int setupRotateStepsLeft = 400;    // initial yaw toward left hit
-  int setupRotateStepsRight = 400;   // initial yaw toward right hit
-  int setupExtendSteps = 80;         // short reach before dropping to rock
-  int setupLowerSteps = 2300;        // from raised pose down to rock level
-
-  // Pickup step counts — tune on hardware.
+  // Primary pickup step counts (tuned on hardware).
+  int initialExtendSteps = 200;   // first reach before rotate/lower
+  int rotateSteps = 280;          // yaw toward the metal-hit side
+  int lowerSteps = 5000;          // drop to rock level
+  int raiseSteps = 5500;          // stow raise after grab (may exceed lower)
   // maxExtendSteps is total horizontal travel from home (all extends combined).
   int maxExtendSteps = 300;
-  int rotateScanMaxSteps = 1200;       // safety stop if sonar never trips
-  int rotateStepsBetweenPings = 8;     // ping sonar every N steps while scanning
+  int rotateScanMaxSteps = 1200;  // safety stop if sonar never trips
+  int rotateStepsBetweenPings = 8;
 
   // Stop RotateScan when a valid echo is within this window (cm).
-  // After lock, a short yaw bias corrects metal-detector vs sonar offset,
+  // After lock, a short yaw continue corrects metal vs sonar offset,
   // then Extend uses the microswitch only — sonar is ignored.
   float sonarDetectMaxCm = 20.0f;
   float sonarDetectMinCm = 4.0f;
-  // After sonar lock, continue the same side yaw this long (L and R).
   uint32_t postScanYawAdjustMs = 500;
+
+  // Recenter fractions of total yaw after raise (per side).
+  // Left: 1/4, Right: 5/8 of rotateStepsTaken_.
+  int recenterLeftNum = 1;
+  int recenterLeftDen = 4;
+  int recenterRightNum = 5;
+  int recenterRightDen = 8;
 
   // Half-period delay between step edges (us). Higher = slower.
   int rotationStepDelayUs = 1000;
@@ -76,7 +65,7 @@ struct PickupArmConfig {
   int servoClosedDeg = 180;
 
   // Direction polarity per axis (HIGH/LOW on the DIR pin).
-  // SetupRotate, RotateScan, and post-scan continue all share these per side.
+  // Rotate, RotateScan, and post-scan continue all share these per side.
   bool rotateDirLeft = false;
   bool rotateDirRight = true;
   bool lowerDirDown = true;
@@ -86,21 +75,20 @@ struct PickupArmConfig {
 };
 
 enum class PickupPhase {
-  Idle,         // not running
-  SetupRaise,   // small lift from starting pose
-  SetupRotate,  // yaw toward the detected metal side
-  SetupExtend,  // short horizontal reach
-  SetupLower,   // drop to rock level
-  RotateScan,   // rotate toward side until sonar sees an object
-  PostScanYawAdjust,  // continue same side yaw briefly after sonar lock
-  Extend,       // reach out until a limit switch trips
-  Grip,         // close the gripper
-  Retract,      // pull the horizontal axis back in
-  Raise,        // bring the vertical axis back up to stow height
-  Recenter,     // undo setup+scan rotation back to starting yaw
-  RetractInitial, // tuneMode: undo the first/home extend after recenter
-  OpenGrip,     // open the gripper once recentered
-  Done,         // sequence finished — arm stowed, gripper open
+  Idle,              // not running
+  InitialExtend,     // fixed first reach from home
+  Rotate,            // yaw toward the detected metal side
+  Lower,             // drop to rock level
+  RotateScan,        // rotate toward side until sonar sees an object
+  PostScanYawAdjust, // continue same side yaw briefly after sonar lock
+  Extend,            // reach out until limit switch or max from home
+  Grip,              // close the gripper
+  Retract,           // pull back grab reach only
+  Raise,             // bring the vertical axis back up
+  Recenter,          // undo part of yaw toward starting heading
+  RetractInitial,    // undo the first/home extend after recenter
+  OpenGrip,          // open the gripper once stowed
+  Done,              // sequence finished — arm stowed, gripper open
 };
 
 class PickupArm {
@@ -118,7 +106,6 @@ class PickupArm {
     return phase_ != PickupPhase::Idle && phase_ != PickupPhase::Done;
   }
   PickupPhase phase() const { return phase_; }
-  bool isTuneMode() const { return config_.tuneMode; }
 
  private:
   void stepAxis(int stepPin, int dirPin, bool dir, int steps, int pulseUs);
@@ -135,9 +122,8 @@ class PickupArm {
   Servo gripper_;
   PickupPhase phase_ = PickupPhase::Idle;
   MetalSide side_ = MetalSide::None;
-  int extendStepsTaken_ = 0;   // total horizontal out from home
-  int initialExtendSteps_ = 0; // first extend (undone after recenter in tune)
-  int rotateStepsTaken_ = 0;   // setup rotate + scan rotate
-  int stowRaiseSteps_ = 0;     // vertical steps to return to start height
-  bool tuneFixedExtendPending_ = false;  // first tune Extend uses fixed steps
+  int extendStepsTaken_ = 0;    // total horizontal out from home
+  int initialExtendSteps_ = 0;  // first extend (undone after recenter)
+  int rotateStepsTaken_ = 0;    // rotate + scan + post-scan yaw
+  int stowRaiseSteps_ = 0;      // vertical steps to return toward start height
 };
