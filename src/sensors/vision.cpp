@@ -9,6 +9,7 @@ void VisionInference::armIdle() {
   pinMode(kPiCam0Pin, INPUT_PULLDOWN);
 
   foundCamera_ = -1;
+  detectCount_ = 0;
   high3SinceMs_ = 0;
   high4SinceMs_ = 0;
   cam0Armed_ = false;
@@ -61,6 +62,7 @@ void VisionInference::startSearch() {
   pinMode(kPiCam0Pin, INPUT_PULLDOWN);
 
   foundCamera_ = -1;
+  detectCount_ = 0;
   high3SinceMs_ = 0;
   high4SinceMs_ = 0;
   cam0Armed_ = false;
@@ -69,7 +71,10 @@ void VisionInference::startSearch() {
   searchStartedMs_ = millis();
   phase_ = Phase::WaitDetect;
   enabled_ = true;
-  Serial.println("[VISION] START rising edge -> dual search; GPIO4 released");
+  Serial.printf(
+      "[VISION] START rising edge -> dual search; expect %u detects; "
+      "GPIO4 released\n",
+      static_cast<unsigned>(MissionConfig::kRequiredDetects));
 }
 
 void VisionInference::enable(bool on) {
@@ -90,7 +95,8 @@ void VisionInference::enable(bool on) {
     }
     startSearch();
   } else {
-    // poll() may already have entered Cooldown on DETECT — do not reset the timer.
+    // poll() may already have entered Cooldown on the 2nd DETECT — do not
+    // reset the timer.
     if (phase_ == Phase::Cooldown) {
       pinMode(kPiCam1StartPin, OUTPUT);
       digitalWrite(kPiCam1StartPin, LOW);
@@ -102,17 +108,41 @@ void VisionInference::enable(bool on) {
   }
 }
 
+void VisionInference::acceptDetect(int8_t camera, VisionDetectResult& out) {
+  foundCamera_ = camera;
+  ++detectCount_;
+  out.found = true;
+  out.camera = camera;
+  out.detectCount = detectCount_;
+
+  // Disarm both lines until we see LOW again — avoids counting the remainder
+  // of this ~100 ms pulse (or a simultaneous edge) twice.
+  high3SinceMs_ = 0;
+  high4SinceMs_ = 0;
+  cam0Armed_ = false;
+  cam1Armed_ = false;
+
+  Serial.printf(
+      "[VISION] DETECT_CAM%d (GPIO%d) — teletubby #%u/%u\n",
+      static_cast<int>(camera), camera == 0 ? 3 : 4,
+      static_cast<unsigned>(detectCount_),
+      static_cast<unsigned>(MissionConfig::kRequiredDetects));
+
+  if (detectCount_ >= MissionConfig::kRequiredDetects) {
+    enterCooldown();
+  }
+}
+
 VisionDetectResult VisionInference::poll() {
   VisionDetectResult out;
 
   finishCooldownIfReady();
 
   if (pendingInject_) {
-    out.found = true;
-    out.camera = pendingInjectCamera_;
-    foundCamera_ = pendingInjectCamera_;
     pendingInject_ = false;
-    enterCooldown();
+    if (phase_ == Phase::WaitDetect) {
+      acceptDetect(pendingInjectCamera_, out);
+    }
     return out;
   }
 
@@ -151,25 +181,17 @@ VisionDetectResult VisionInference::poll() {
     if (high3SinceMs_ == 0) {
       high3SinceMs_ = now;
     } else if (now - high3SinceMs_ >= MissionConfig::kDetectMinPulseMs) {
-      foundCamera_ = 0;
-      out.found = true;
-      out.camera = 0;
-      Serial.println("[VISION] DETECT_CAM0 (GPIO3) — teletubby on cam0");
-      enterCooldown();
+      acceptDetect(0, out);
       return out;
     }
   }
 
   // DETECT_CAM1 on Pi GPIO4 (same wire we released after START).
-  if (cam1High && cam1Armed_ && !blanking) {
+  if (phase_ == Phase::WaitDetect && cam1High && cam1Armed_ && !blanking) {
     if (high4SinceMs_ == 0) {
       high4SinceMs_ = now;
     } else if (now - high4SinceMs_ >= MissionConfig::kDetectMinPulseMs) {
-      foundCamera_ = 1;
-      out.found = true;
-      out.camera = 1;
-      Serial.println("[VISION] DETECT_CAM1 (GPIO4) — teletubby on cam1");
-      enterCooldown();
+      acceptDetect(1, out);
       return out;
     }
   }

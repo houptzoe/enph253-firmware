@@ -59,7 +59,8 @@ void ReflectanceDisplay::showReadings(int leftAvg, int rightAvg, bool leftOnTape
   display.display();
 }
 
-void ReflectanceDisplay::showTeletubbyDetected(int8_t camera) {
+void ReflectanceDisplay::showTeletubbyDetected(int8_t camera,
+                                               uint8_t detectCount) {
   const uint32_t nowMs = millis();
   if (nowMs - lastUpdateMs_ < kMinUpdateMs) {
     return;
@@ -71,7 +72,7 @@ void ReflectanceDisplay::showTeletubbyDetected(int8_t camera) {
 
   display.setTextSize(1);
   display.setCursor(0, 8);
-  display.println(F("TELETUBBY DETECTED"));
+  display.printf("TT DETECTED #%u/2", static_cast<unsigned>(detectCount));
 
   display.setTextSize(2);
   display.setCursor(0, 32);

@@ -8,7 +8,7 @@
 #include "sensors/vision.h"
 #include "telemetry/telemetry.h"
 
-// Dual-cam teletubby handshake — tape-follow; Pi START/DETECT via vision.
+// Dual-cam teletubby handshake — two DETECT pulses per mission, then Pi exits.
 
 static MotorDriver motors;
 static TapeFollowPid tapeFollow;
@@ -110,7 +110,8 @@ void loop() {
 
   mission.update();
   telemetry.updateMissionStatus(mission.phaseName(),
-                                mission.lastDetectedCamera());
+                                mission.lastDetectedCamera(),
+                                mission.detectCount());
 
   TapeFollowState state;
   if (tapeFollow.update(state)) {
@@ -154,7 +155,8 @@ void loop() {
     }
 
     if (mission.lastDetectedCamera() >= 0) {
-      reflectanceDisplay.showTeletubbyDetected(mission.lastDetectedCamera());
+      reflectanceDisplay.showTeletubbyDetected(mission.lastDetectedCamera(),
+                                               mission.detectCount());
     } else {
       reflectanceDisplay.showReadings(state.leftAvg, state.rightAvg,
                                       state.leftOnTape, state.rightOnTape);

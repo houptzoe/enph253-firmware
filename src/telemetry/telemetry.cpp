@@ -90,7 +90,7 @@ async function refresh(){
     corr.textContent=j.correction.toFixed(2);
     vstatus.textContent=j.missionPhase;
     vstatus.className=j.missionPhase==='Idle'?'off':'on';
-    vdet.textContent=j.camera<0?'—':('TELETUBBY DETECTED — CAM '+j.camera);
+    vdet.textContent=j.camera<0?'—':('TT #'+j.detectCount+'/2 — CAM '+j.camera);
   }catch(e){}
 }
 start.onclick=async()=>{
@@ -229,9 +229,11 @@ void TelemetryServer::updateSnapshot(const TelemetrySnapshot& snapshot) {
 }
 
 void TelemetryServer::updateMissionStatus(const char* phaseName,
-                                          int8_t detectedCamera) {
+                                          int8_t detectedCamera,
+                                          uint8_t detectCount) {
   missionPhase_ = phaseName;
   detectedCamera_ = detectedCamera;
+  detectCount_ = detectCount;
 }
 
 VisionCommand TelemetryServer::takeVisionCommand() {
@@ -271,14 +273,15 @@ void TelemetryServer::handleStatus() {
            "\"leftSpeed\":%.2f,\"rightSpeed\":%.2f,"
            "\"leftDuty\":%lu,\"rightDuty\":%lu,"
            "\"error\":%.3f,\"correction\":%.3f,"
-           "\"missionPhase\":\"%s\",\"camera\":%d}",
+           "\"missionPhase\":\"%s\",\"camera\":%d,\"detectCount\":%u}",
            cfg.kp, cfg.ki, cfg.kd, cfg.integralMax,
            drive_.running ? "true" : "false", drive_.leftBaseSpeed,
            drive_.rightBaseSpeed, motors_->leftSpeed(), motors_->rightSpeed(),
            static_cast<unsigned long>(motors_->leftDuty()),
            static_cast<unsigned long>(motors_->rightDuty()), snapshot_.error,
            snapshot_.correction, missionPhase_,
-           static_cast<int>(detectedCamera_));
+           static_cast<int>(detectedCamera_),
+           static_cast<unsigned>(detectCount_));
   server.send(200, "application/json", buf);
 }
 

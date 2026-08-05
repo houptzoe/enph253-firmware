@@ -24,7 +24,8 @@ class TelemetryServer {
  public:
   void begin(TapeFollowPid& pid, MotorDriver& motors);
   void updateSnapshot(const TelemetrySnapshot& snapshot);
-  void updateMissionStatus(const char* phaseName, int8_t detectedCamera);
+  void updateMissionStatus(const char* phaseName, int8_t detectedCamera,
+                           uint8_t detectCount = 0);
   void poll();
 
   const DriveSettings& drive() const { return drive_; }
@@ -49,4 +50,5 @@ class TelemetryServer {
   VisionCommand visionCommand_ = VisionCommand::None;
   const char* missionPhase_ = "Idle";
   int8_t detectedCamera_ = -1;
+  uint8_t detectCount_ = 0;
 };

@@ -8,7 +8,7 @@ class ReflectanceDisplay {
  public:
   void begin();
   void showReadings(int leftAvg, int rightAvg, bool leftOnTape, bool rightOnTape);
-  void showTeletubbyDetected(int8_t camera);
+  void showTeletubbyDetected(int8_t camera, uint8_t detectCount = 1);
 
  private:
   static constexpr uint32_t kMinUpdateMs = 50;  // limit I2C refresh rate

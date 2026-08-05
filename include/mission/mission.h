@@ -2,17 +2,19 @@
 
 #include <Arduino.h>
 
+#include "hardware/status_leds.h"
 #include "motor/motor.h"
 #include "sensors/vision.h"
 
-// Dual-cam teletubby handshake test: tape-follow while searching; on DETECT
-// (cam0 or cam1) stop 1 s then resume tape-follow.
+// Dual-cam teletubby handshake: tape-follow while searching; on each DETECT
+// stop, blink the camera-side arrow LED 3×, then resume. After the 2nd DETECT
+// (Pi shuts off), cruise.
 
 enum class MissionPhase : uint8_t {
   Idle,
   SearchTeletubby,
   PauseOnDetect,
-  Cruise,  // post-detect tape-follow; mission still "active" until abort
+  Cruise,  // after required detects; mission still "active" until abort
 };
 
 struct MissionDriveCommand {
@@ -36,14 +38,19 @@ class MissionController {
   bool searching() const { return phase_ == MissionPhase::SearchTeletubby; }
   // -1 = none yet this mission; 0 = cam0; 1 = cam1.
   int8_t lastDetectedCamera() const { return lastDetectedCamera_; }
+  // 0 until first pulse; then 1..kRequiredDetects.
+  uint8_t detectCount() const { return detectCount_; }
 
  private:
   void setTapeFollow();
   void setStop();
+  void onDetect(const VisionDetectResult& vision);
+  void finishPause();
 
   VisionInference* vision_ = nullptr;
+  StatusLeds leds_{};
   MissionPhase phase_ = MissionPhase::Idle;
   MissionDriveCommand drive_{};
-  uint32_t pauseEndMs_ = 0;
   int8_t lastDetectedCamera_ = -1;
+  uint8_t detectCount_ = 0;
 };

@@ -35,7 +35,7 @@ constexpr int kMetalDetectorRightPin = 14;
 constexpr int kSwitch1Pin = 15;
 constexpr int kSwitch0Pin = 41;
 
-// Status LEDs — GPIO 16, 17
+// Status / arrow LEDs — GPIO 16 (left / cam0), GPIO 17 (right / cam1)
 constexpr int kLedLeftPin = 16;
 constexpr int kLedRightPin = 17;
 

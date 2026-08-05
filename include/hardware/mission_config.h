@@ -12,8 +12,14 @@ constexpr float kMinBaseSpeed = 70.0f;
 // Base speed while searching for teletubby (tape-follow).
 constexpr float kTeletubbySearchBaseSpeed = kMinBaseSpeed;
 
-// Hold motors stopped this long after DETECT before resuming tape-follow.
-constexpr uint32_t kTeletubbyStopMs = 1000;
+// Arrow LED blink on each DETECT (cam0 → left LED, cam1 → right LED).
+// Motors stay stopped until the blink sequence finishes, then resume.
+constexpr uint8_t kArrowBlinkCount = 3;
+constexpr uint32_t kArrowBlinkOnMs = 200;
+constexpr uint32_t kArrowBlinkOffMs = 200;
+
+// Pi sends this many DETECT pulses per mission, then exits (systemd restart).
+constexpr uint8_t kRequiredDetects = 2;
 
 // Ignore DETECT glitches shorter than this (Pi pulse is ~100 ms active HIGH).
 constexpr uint32_t kDetectMinPulseMs = 50;
@@ -21,7 +27,7 @@ constexpr uint32_t kDetectMinPulseMs = 50;
 // Hold START HIGH this long before releasing GPIO4 for DETECT_CAM1 (1–5 ms).
 constexpr uint32_t kStartReleaseDelayMs = 2;
 
-// Pi systemd RestartSec=3 — wait before next START after DETECT.
+// Pi systemd RestartSec=3 — wait before next START after the 2nd DETECT.
 constexpr uint32_t kPiCooldownMs = 3500;
 
 // Both Pi lines idle HIGH (BCM3 has a 1.8k hardware pull-up, BCM4 a default
