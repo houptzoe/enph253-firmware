@@ -180,4 +180,4 @@
  C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
  C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
  include/display/display.h include/hardware/pins.h include/motor/motor.h \
- include/pid/pid.h include/telemetry/telemetry.h
+ include/pid/pid.h

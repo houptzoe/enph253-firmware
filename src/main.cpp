@@ -4,14 +4,15 @@
 #include "hardware/pins.h"
 #include "motor/motor.h"
 #include "pid/pid.h"
-#include "telemetry/telemetry.h"
 
 // Robot application — wires tape-follow PID output to the motor driver.
 
 static MotorDriver motors;
 static TapeFollowPid tapeFollow;
 static ReflectanceDisplay reflectanceDisplay;
-static TelemetryServer telemetry;
+
+static constexpr float kBaseSpeed = 90.0f;
+static constexpr float kMaxSpeed = 150.0f;
 
 // ---------------------------------------------------------------------------
 // Subsystem setup helpers
@@ -22,9 +23,6 @@ static void initTapeFollow() {
   config.leftReflectancePin = kLeftReflectancePin;
   config.rightReflectancePin = kRightReflectancePin;
   config.reflectanceThreshold = 650;
-  // Slower sampler so SoftAP beacons are not starved on CPU0 (was 500 us).
-  config.samplePeriodUs = 2000;
-  config.samplesPerUpdate = 5;  // still ~100 Hz control
   config.kp = 45.0f;
   config.ki = 0.0f;
   config.kd = 10.0f;
@@ -37,7 +35,6 @@ static void initTapeFollow() {
 // ---------------------------------------------------------------------------
 
 void setup() {
-  
   pinMode(kRotationDirPin, OUTPUT);
   pinMode(kRotationStepPin, OUTPUT);
   pinMode(kVerticalDirPin, OUTPUT);
@@ -52,16 +49,13 @@ void setup() {
   digitalWrite(kVerticalDirPin, LOW);
   digitalWrite(kHorizontalDirPin, LOW);
   digitalWrite(kHorizontalStepPin, LOW);
-  
+
   Serial.begin(115200);
-  delay(500);  // USB-CDC ready before we log SoftAP status
+  delay(200);
 
-  // Diagnostic: distinguish brownout resets (weak supply) from crashes.
   Serial.printf("[BOOT] Reset reason: %d (1=poweron 3=sw 4=panic 5/6/7=wdt "
-                "9=brownout)\n", esp_reset_reason());
-
-  // Bring SoftAP up first so a hung OLED/I2C init cannot block WiFi.
-  telemetry.begin(tapeFollow, motors);
+                "9=brownout)\n",
+                esp_reset_reason());
 
   motors.begin();
   reflectanceDisplay.begin();
@@ -71,40 +65,24 @@ void setup() {
 void loop() {
   TapeFollowState state;
   if (tapeFollow.update(state)) {
-    const DriveSettings& drive = telemetry.drive();
-    float leftSpeed = 0.0f;
-    float rightSpeed = 0.0f;
-
-    if (drive.running) {
-      // Differential drive: subtract correction from left, add to right.
-      leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
-                            drive.maxSpeed);
-      rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
-                             drive.maxSpeed);
-      motors.applyDrive(leftSpeed, rightSpeed);
-    } else {
-      motors.stop();
-    }
+    // Differential drive: subtract correction from left, add to right.
+    const float leftSpeed =
+        constrain(kBaseSpeed - state.correction, 0.0f, kMaxSpeed);
+    const float rightSpeed =
+        constrain(kBaseSpeed + state.correction, 0.0f, kMaxSpeed);
+    motors.applyDrive(leftSpeed, rightSpeed);
 
     reflectanceDisplay.showReadings(state.leftAvg, state.rightAvg,
                                     state.leftOnTape, state.rightOnTape);
-
-    TelemetrySnapshot snap;
-    snap.error = state.error;
-    snap.correction = state.correction;
-    telemetry.updateSnapshot(snap);
 
     static uint32_t lastLogMs = 0;
     const uint32_t nowMs = millis();
     if (nowMs - lastLogMs >= 200) {
       lastLogMs = nowMs;
       Serial.printf(
-          "run:%d L:%4d(%d) R:%4d(%d) err:%.1f corr:%.1f Lspd:%.0f Rspd:%.0f\n",
-          drive.running ? 1 : 0, state.leftAvg, state.leftOnTape, state.rightAvg,
-          state.rightOnTape, state.error, state.correction, leftSpeed,
-          rightSpeed);
+          "L:%4d(%d) R:%4d(%d) err:%.1f corr:%.1f Lspd:%.0f Rspd:%.0f\n",
+          state.leftAvg, state.leftOnTape, state.rightAvg, state.rightOnTape,
+          state.error, state.correction, leftSpeed, rightSpeed);
     }
   }
-
-  telemetry.poll();
 }
