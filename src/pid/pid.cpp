@@ -71,7 +71,16 @@ float TapeFollowPid::controlPeriodSec() const {
          static_cast<float>(config_.samplesPerUpdate) / 1000000.0f;
 }
 
-void TapeFollowPid::reset() { pid_.reset(); }
+void TapeFollowPid::reset() {
+  pid_.reset();
+  // Treat as a fresh line search: both-off holds 0 → drive straight until
+  // a sensor hits tape again (do not keep the pre-shortcut last error).
+  portENTER_CRITICAL(&sensorMux_);
+  lastKnownError_ = 0.0f;
+  snapshot_.error = 0.0f;
+  snapshot_.correction = 0.0f;
+  portEXIT_CRITICAL(&sensorMux_);
+}
 
 void TapeFollowPid::setGains(float kp, float ki, float kd, float integralMax) {
   config_.kp = kp;
@@ -93,7 +102,8 @@ float TapeFollowPid::digitalLineError(bool leftOn, bool rightOn) {
   // Sensors at front, wheels at rear — pivot mid-chassis.
   // +1: left on tape, right off → veered right → steer left.
   // -1: right on tape, left off → veered left → steer right.
-  //  0: both on tape (centered) or both off (lost — hold last correction).
+  //  0: both on tape (centered) or both off (lost — hold lastKnownError_;
+  //     after reset() that is 0 so the robot drives straight until re-acquire).
   if (leftOn && rightOn) {
     return 0.0f;
   }

@@ -40,7 +40,7 @@ static RobotMode mode = RobotMode::LineFollowing;
 // Course timeline (line-follow drives motion; IMU only detects ~180° completes).
 enum class CoursePhase {
   PreFirst180,    // metal on, cruise 90
-  AfterFirst180,  // ramp 135 for 4.5 s; R→90 then L→90 (+0.2 s); keep line-following
+  AfterFirst180,  // ramp 4.5s; L135/R0 0.4s; L135/R90 0.4s; then LF @ 90
   PreSecond180,   // metal on, cruise 90; watch for second ~180
   PostSecond180,  // arm deploy, then line-follow with IR until beacon
 };
@@ -66,10 +66,12 @@ static constexpr uint32_t kImuSettleTimeoutMs = 12000; // force-lock if never qu
 static bool metalEnabled = false;  // TEST: metal detectors disengaged
 static bool secondTurnArmed = false;
 static uint32_t secondTurnArmAfterMs = 0;
-// After ramp: right drops to cruise first, left follows 200 ms later.
+// After ramp: L135/R0 → L135/R90 open-loop, then resume LF @ 90.
 static bool rampStaggerStarted = false;
-static bool rampStaggerDone = false;
-static uint32_t rampLeftCatchUpAtMs = 0;
+static bool rampShortcutDone = false;
+static bool rampBlendDone = false;
+static uint32_t rampShortcutEndAtMs = 0;
+static uint32_t rampBlendEndAtMs = 0;
 
 static float irHz = 0.0f;
 static bool irHighBand = false;
@@ -86,7 +88,8 @@ static constexpr float kTurnDetectDeg = 165.0f;       // second ~180
 static constexpr float kFirstTurnDetectDeg = 160.0f;  // start ramp early on first turn
 static constexpr float kSecondTurnRearmDeg = 30.0f;
 static constexpr uint32_t kSecondTurnCooldownMs = 4500;  // AfterFirst180 ramp duration
-static constexpr uint32_t kRampStaggerMs = 200;       // left catches cruise after right
+static constexpr uint32_t kRampStaggerMs = 400;  // open-loop hard cut (R stopped)
+static constexpr uint32_t kRampBlendMs = 400;    // open-loop L135/R90
 
 
 namespace {
@@ -223,7 +226,8 @@ void updateCoursePhaseFromImu() {
     secondTurnArmed = false;
     secondTurnArmAfterMs = millis() + kSecondTurnCooldownMs;
     rampStaggerStarted = false;
-    rampStaggerDone = false;
+    rampShortcutDone = false;
+    rampBlendDone = false;
     resetImuTurnTracking(imuLastYawDeg);  // start next-leg measure from 0
     telemetry.setBaseSpeeds(kRampBaseSpeed, kRampBaseSpeed);
     Serial.printf("[COURSE] %s — first turn >=%.0f (%.1f deg), ramp %.0f for %lu ms\n",
@@ -234,23 +238,29 @@ void updateCoursePhaseFromImu() {
   }
 
   if (coursePhase == CoursePhase::AfterFirst180) {
-    // Still line-following. After ramp time: right→90, then left→90 0.2 s later.
+    // After ramp: (1) L135/R0 0.4s (2) L135/R90 0.4s (3) resume line-follow.
     if (millis() >= secondTurnArmAfterMs) {
       if (!rampStaggerStarted) {
         rampStaggerStarted = true;
-        rampLeftCatchUpAtMs = millis() + kRampStaggerMs;
-        // Left stays at ramp briefly; right drops to cruise first.
+        rampShortcutEndAtMs = millis() + kRampStaggerMs;
+        telemetry.setBaseSpeeds(kRampBaseSpeed, 0.0f);
+        Serial.println(F("[COURSE] open-loop shortcut 400 ms (L135/R0)"));
+      } else if (!rampShortcutDone && millis() >= rampShortcutEndAtMs) {
+        rampShortcutDone = true;
+        rampBlendEndAtMs = millis() + kRampBlendMs;
         telemetry.setBaseSpeeds(kRampBaseSpeed, kCruiseBaseSpeed);
-        Serial.println(F("[COURSE] ramp end — right→90, left catches up in 200 ms"));
-      } else if (!rampStaggerDone && millis() >= rampLeftCatchUpAtMs) {
-        rampStaggerDone = true;
+        Serial.println(F("[COURSE] open-loop blend 400 ms (L135/R90)"));
+      } else if (rampShortcutDone && !rampBlendDone &&
+                 millis() >= rampBlendEndAtMs) {
+        rampBlendDone = true;
         telemetry.setBaseSpeeds(kCruiseBaseSpeed, kCruiseBaseSpeed);
-        Serial.println(F("[COURSE] left→90 — both cruise, line-follow continues"));
-      } else if (rampStaggerDone) {
+        tapeFollow.reset();
+        Serial.println(F("[COURSE] blend done — LF reset, search straight @ 90"));
+      } else if (rampBlendDone) {
         telemetry.setBaseSpeeds(kCruiseBaseSpeed, kCruiseBaseSpeed);
       }
 
-      if (rampStaggerDone && !secondTurnArmed &&
+      if (rampBlendDone && !secondTurnArmed &&
           turned <= kSecondTurnRearmDeg) {
         secondTurnArmed = true;
         coursePhase = CoursePhase::PreSecond180;
@@ -266,6 +276,41 @@ void updateCoursePhaseFromImu() {
     Serial.printf("[COURSE] second ~180 done (%.1f deg)\n", turned);
     enterPostSecond180();
     resetImuTurnTracking(imuLastYawDeg);
+  }
+}
+
+bool isRampShortcutActive() {
+  return coursePhase == CoursePhase::AfterFirst180 && rampStaggerStarted &&
+         !rampShortcutDone;
+}
+
+bool isRampBlendActive() {
+  return coursePhase == CoursePhase::AfterFirst180 && rampShortcutDone &&
+         !rampBlendDone;
+}
+
+bool isRampOpenLoopActive() {
+  return isRampShortcutActive() || isRampBlendActive();
+}
+
+// Advance open-loop phases on timers (drive loop + IMU path).
+void maybeFinishRampOpenLoop() {
+  if (coursePhase != CoursePhase::AfterFirst180 || !rampStaggerStarted) {
+    return;
+  }
+
+  if (!rampShortcutDone && millis() >= rampShortcutEndAtMs) {
+    rampShortcutDone = true;
+    rampBlendEndAtMs = millis() + kRampBlendMs;
+    telemetry.setBaseSpeeds(kRampBaseSpeed, kCruiseBaseSpeed);
+    Serial.println(F("[COURSE] open-loop blend 400 ms (L135/R90)"));
+  }
+
+  if (rampShortcutDone && !rampBlendDone && millis() >= rampBlendEndAtMs) {
+    rampBlendDone = true;
+    telemetry.setBaseSpeeds(kCruiseBaseSpeed, kCruiseBaseSpeed);
+    tapeFollow.reset();
+    Serial.println(F("[COURSE] blend done — LF reset, search straight @ 90"));
   }
 }
 
@@ -397,6 +442,17 @@ static void runLineFollowing() {
   static bool distanceValid = false;
   static bool oledDirty = false;
 
+  maybeFinishRampOpenLoop();
+
+  // Open-loop after ramp: L135/R0 → L135/R90 — no PID; then LF @ 90.
+  if (telemetry.drive().running && isRampOpenLoopActive()) {
+    if (isRampShortcutActive()) {
+      motors.applyDrive(kRampBaseSpeed, 0.0f);
+    } else {
+      motors.applyDrive(kRampBaseSpeed, kCruiseBaseSpeed);
+    }
+  }
+
   TapeFollowState state;
   if (tapeFollow.update(state)) {
     const DriveSettings& drive = telemetry.drive();
@@ -404,12 +460,20 @@ static void runLineFollowing() {
     float rightSpeed = 0.0f;
 
     if (drive.running) {
-      // Differential drive: add correction to left, subtract from right.
-      leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
-                            drive.maxSpeed);
-      rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
-                             drive.maxSpeed);
-      motors.applyDrive(leftSpeed, rightSpeed);
+      if (isRampShortcutActive()) {
+        leftSpeed = kRampBaseSpeed;
+        rightSpeed = 0.0f;
+      } else if (isRampBlendActive()) {
+        leftSpeed = kRampBaseSpeed;
+        rightSpeed = kCruiseBaseSpeed;
+      } else {
+        // Differential drive: add correction to left, subtract from right.
+        leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
+                              drive.maxSpeed);
+        rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
+                               drive.maxSpeed);
+        motors.applyDrive(leftSpeed, rightSpeed);
+      }
     } else {
       motors.stop();
     }
