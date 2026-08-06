@@ -7,14 +7,15 @@
 #include "sensors/vision.h"
 
 // Dual-cam teletubby handshake: tape-follow while searching; on each DETECT
-// stop, blink the camera-side arrow LED 3×, then resume. After the 2nd DETECT
-// (Pi shuts off), cruise.
+// stop, blink the camera-side arrow LED 3×, then resume. After the 1st find,
+// issue a second START when driving again. After the 2nd find, cruise (no more
+// START — Pi stays idle).
 
 enum class MissionPhase : uint8_t {
   Idle,
   SearchTeletubby,
   PauseOnDetect,
-  Cruise,  // after required detects; mission still "active" until abort
+  Cruise,  // after required finds; mission still "active" until abort
 };
 
 struct MissionDriveCommand {
@@ -38,7 +39,7 @@ class MissionController {
   bool searching() const { return phase_ == MissionPhase::SearchTeletubby; }
   // -1 = none yet this mission; 0 = cam0; 1 = cam1.
   int8_t lastDetectedCamera() const { return lastDetectedCamera_; }
-  // 0 until first pulse; then 1..kRequiredDetects.
+  // 0 until first pulse; then 1..kRequiredFinds.
   uint8_t detectCount() const { return detectCount_; }
 
  private:

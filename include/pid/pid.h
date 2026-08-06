@@ -17,7 +17,7 @@ struct TapeFollowConfig {
   uint16_t samplesPerUpdate = 10;    // average samples → 200 Hz control loop
   float kp = 45.0f;
   float ki = 0.0f;
-  float kd = 10.0f;
+  float kd = 15.0f;
   float integralMax = 10.0f;         // anti-windup clamp
 };
 

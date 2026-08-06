@@ -18,8 +18,8 @@ constexpr uint8_t kArrowBlinkCount = 3;
 constexpr uint32_t kArrowBlinkOnMs = 200;
 constexpr uint32_t kArrowBlinkOffMs = 200;
 
-// Pi sends this many DETECT pulses per mission, then exits (systemd restart).
-constexpr uint8_t kRequiredDetects = 2;
+// Robot-side teletubby count across two independent STARTs (one DETECT each).
+constexpr uint8_t kRequiredFinds = 2;
 
 // Ignore DETECT glitches shorter than this (Pi pulse is ~100 ms active HIGH).
 constexpr uint32_t kDetectMinPulseMs = 50;
@@ -27,13 +27,14 @@ constexpr uint32_t kDetectMinPulseMs = 50;
 // Hold START HIGH this long before releasing GPIO4 for DETECT_CAM1 (1–5 ms).
 constexpr uint32_t kStartReleaseDelayMs = 2;
 
-// Pi systemd RestartSec=3 — wait before next START after the 2nd DETECT.
-constexpr uint32_t kPiCooldownMs = 3500;
+// After DETECT the Pi returns to idle in-process (typically <1 s). Wait at
+// least this long before re-arming GPIO4 LOW and issuing the next START.
+constexpr uint32_t kPiIdleMs = 1000;
 
-// Both Pi lines idle HIGH (BCM3 has a 1.8k hardware pull-up, BCM4 a default
-// internal one) until mars-cv claims them as LOW outputs. Ignore detects until
-// then, and until the Pi finishes its ~20-frame warmup.
-constexpr uint32_t kDetectBlankingMs = 1500;
+// Both Pi lines may idle HIGH (BCM3 has a 1.8k hardware pull-up, BCM4 a
+// default internal one) until mars-cv claims them as LOW outputs. Ignore
+// detects until then, and until the Pi finishes its ~5-frame warmup (~0.3 s).
+constexpr uint32_t kDetectBlankingMs = 500;
 
 // Warn once if a line never goes LOW — mars-cv likely is not running.
 constexpr uint32_t kDetectArmWarnMs = 4000;

@@ -11,10 +11,10 @@ constexpr int kRightReflectancePin = 2;
 // Drive motors — two-wire H-bridge: PWM the active direction pin per side.
 // Left:  pwmL0 forward (GPIO 3), pwmL1 reverse (GPIO 4)
 // Right: pwmR0 forward (GPIO 5), pwmR1 reverse (GPIO 6)
-constexpr int kLeftMotorPwm0Pin = 3;
-constexpr int kLeftMotorPwm1Pin = 4;
-constexpr int kRightMotorPwm0Pin = 5;
-constexpr int kRightMotorPwm1Pin = 6;
+constexpr int kLeftMotorPwm0Pin = 5;
+constexpr int kLeftMotorPwm1Pin = 6;
+constexpr int kRightMotorPwm0Pin = 3;
+constexpr int kRightMotorPwm1Pin = 4;
 
 // IR detector — GPIO 7 (ADC1_CH6)
 constexpr int kIrDetectorPin = 7;

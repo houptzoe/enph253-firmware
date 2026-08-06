@@ -228,6 +228,13 @@ void TelemetryServer::updateSnapshot(const TelemetrySnapshot& snapshot) {
   snapshot_ = snapshot;
 }
 
+void TelemetryServer::setDriveRunning(bool running) {
+  drive_.running = running;
+  if (!running && motors_ != nullptr) {
+    motors_->stop();
+  }
+}
+
 void TelemetryServer::updateMissionStatus(const char* phaseName,
                                           int8_t detectedCamera,
                                           uint8_t detectCount) {

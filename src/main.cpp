@@ -8,8 +8,8 @@
 #include "sensors/vision.h"
 #include "telemetry/telemetry.h"
 
-// Dual-cam teletubby handshake — two DETECT pulses per mission, then Pi exits.
-// Line-follow gains/speeds from feature/pid.
+// Dual-cam teletubby handshake — one DETECT per START; second find = new START.
+// Line-follow gains/speeds from feature/pid. Drive + vision arm at boot.
 
 static MotorDriver motors;
 static TapeFollowPid tapeFollow;
@@ -32,7 +32,7 @@ static void initTapeFollow() {
   config.samplesPerUpdate = 5;  // still ~100 Hz control
   config.kp = 45.0f;
   config.ki = 0.0f;
-  config.kd = 10.0f;
+  config.kd = 15.0f;
   config.integralMax = 10.0f;
   tapeFollow.begin(config);
 }
@@ -48,10 +48,13 @@ static void pollSerialCommands() {
     }
 
     if (line == "!START" || line == "START") {
+      telemetry.setDriveRunning(true);
       mission.start();
       Serial.println("[CMD] mission start");
     } else if (line == "!ABORT" || line == "ABORT" || line == "!STOP") {
       mission.abort();
+      telemetry.setDriveRunning(false);
+      motors.stop();
       Serial.println("[CMD] mission abort");
     } else if (line == "!TT" || line == "TT" || line == "!DETECT" ||
                line == "!TT0" || line == "TT0") {
@@ -105,8 +108,13 @@ void setup() {
   vision.begin();
   mission.begin(vision);
 
+  // Competition boot: motors armed + Pi START immediately (no SoftAP tap).
+  telemetry.setDriveRunning(true);
+  mission.start();
+
   Serial.println(
-      "[BOOT] dual-cam handshake — Serial: !START !ABORT !TT0 !TT1 !CLR");
+      "[BOOT] drive + dual-cam vision armed — Serial: !START !ABORT "
+      "!TT0 !TT1 !CLR");
 }
 
 void loop() {
@@ -114,10 +122,13 @@ void loop() {
 
   switch (telemetry.takeVisionCommand()) {
     case VisionCommand::Start:
+      telemetry.setDriveRunning(true);
       mission.start();
       break;
     case VisionCommand::Stop:
       mission.abort();
+      telemetry.setDriveRunning(false);
+      motors.stop();
       break;
     case VisionCommand::None:
       break;
@@ -128,47 +139,44 @@ void loop() {
                                 mission.lastDetectedCamera(),
                                 mission.detectCount());
 
-  TapeFollowState state;
-  if (tapeFollow.update(state)) {
-    const DriveSettings& drive = telemetry.drive();
-    float leftSpeed = 0.0f;
-    float rightSpeed = 0.0f;
+  const DriveSettings& drive = telemetry.drive();
+  const MissionDriveCommand cmd = mission.driveCommand();
 
-    // SoftAP Start/Stop also arms/aborts the mission FSM.
-    static bool wasRunning = false;
-    if (drive.running && !wasRunning && !mission.active()) {
+  // SoftAP Start/Stop mirrors drive enable and (re)arms vision.
+  static bool wasRunning = true;  // matches boot-armed state
+  if (drive.running && !wasRunning) {
+    if (!mission.active()) {
       mission.start();
-    } else if (!drive.running && wasRunning && mission.active()) {
-      mission.abort();
     }
-    wasRunning = drive.running;
+  } else if (!drive.running && wasRunning && mission.active()) {
+    mission.abort();
+  }
+  wasRunning = drive.running;
 
-    const MissionDriveCommand cmd = mission.driveCommand();
-    const bool missionRunning = mission.active();
+  // Keep PID sampling whenever we are alive so resume stays on tape.
+  TapeFollowState state;
+  const bool havePid = tapeFollow.update(state);
 
-    // SoftAP left/right base speeds apply in both mission and manual drive.
-    // Motors only turn with Drive running, so Start Vision can search in place.
-    if (missionRunning && drive.running) {
-      if (cmd.mode == MissionDriveCommand::Mode::TapeFollow) {
-        leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
-                              drive.maxSpeed);
-        rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
-                               drive.maxSpeed);
-        motors.applyDrive(leftSpeed, rightSpeed);
-      } else {
-        motors.stop();
-      }
-    } else if (drive.running) {
-      // Manual tape-follow after abort (or before first start).
-      leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
-                            drive.maxSpeed);
-      rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
-                             drive.maxSpeed);
-      motors.applyDrive(leftSpeed, rightSpeed);
-    } else {
-      motors.stop();
-    }
+  // Drive active ⇒ tape-follow PWM. Mission PauseOnDetect ⇒ all PWM off
+  // every loop (do not wait for the next PID tick).
+  const bool pauseMotors =
+      mission.active() && cmd.mode == MissionDriveCommand::Mode::Stop;
+  const bool motorsAllowed = drive.running && !pauseMotors;
 
+  float leftSpeed = 0.0f;
+  float rightSpeed = 0.0f;
+
+  if (!motorsAllowed) {
+    motors.stop();
+  } else if (havePid) {
+    leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
+                          drive.maxSpeed);
+    rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
+                           drive.maxSpeed);
+    motors.applyDrive(leftSpeed, rightSpeed);
+  }
+
+  if (havePid) {
     if (mission.lastDetectedCamera() >= 0) {
       reflectanceDisplay.showTeletubbyDetected(mission.lastDetectedCamera(),
                                                mission.detectCount());

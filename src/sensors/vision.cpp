@@ -2,14 +2,12 @@
 
 #include "hardware/mission_config.h"
 
-void VisionInference::armIdle() {
+void VisionInference::rearmPins() {
   // Drive multiplexed Pi GPIO4 wire LOW so the next START can rise.
   pinMode(kPiCam1StartPin, OUTPUT);
   digitalWrite(kPiCam1StartPin, LOW);
   pinMode(kPiCam0Pin, INPUT_PULLDOWN);
 
-  foundCamera_ = -1;
-  detectCount_ = 0;
   high3SinceMs_ = 0;
   high4SinceMs_ = 0;
   cam0Armed_ = false;
@@ -19,15 +17,27 @@ void VisionInference::armIdle() {
   enabled_ = false;
 }
 
+void VisionInference::resetMission() {
+  rearmPins();
+  foundCamera_ = -1;
+  detectCount_ = 0;
+}
+
 void VisionInference::begin() {
   pendingInject_ = false;
   pendingInjectCamera_ = 0;
-  cooldownStartedMs_ = 0;
-  armIdle();
+  postDetectStartedMs_ = 0;
+  resetMission();
 }
 
-void VisionInference::enterCooldown() {
-  // Reclaim the mux wire immediately; Pi restarts for ~3 s before next START.
+void VisionInference::reset() {
+  pendingInject_ = false;
+  postDetectStartedMs_ = 0;
+  resetMission();
+}
+
+void VisionInference::enterPostDetect() {
+  // Reclaim the mux wire; Pi returns to idle in-process (typically <1 s).
   pinMode(kPiCam1StartPin, OUTPUT);
   digitalWrite(kPiCam1StartPin, LOW);
   pinMode(kPiCam0Pin, INPUT_PULLDOWN);
@@ -35,17 +45,17 @@ void VisionInference::enterCooldown() {
   high4SinceMs_ = 0;
   cam0Armed_ = false;
   cam1Armed_ = false;
-  cooldownStartedMs_ = millis();
-  phase_ = Phase::Cooldown;
+  postDetectStartedMs_ = millis();
+  phase_ = Phase::PostDetect;
   enabled_ = false;
 }
 
-void VisionInference::finishCooldownIfReady() {
-  if (phase_ != Phase::Cooldown) {
+void VisionInference::finishPostDetectIfReady() {
+  if (phase_ != Phase::PostDetect) {
     return;
   }
-  if (millis() - cooldownStartedMs_ >= MissionConfig::kPiCooldownMs) {
-    armIdle();
+  if (millis() - postDetectStartedMs_ >= MissionConfig::kPiIdleMs) {
+    rearmPins();
   }
 }
 
@@ -62,7 +72,6 @@ void VisionInference::startSearch() {
   pinMode(kPiCam0Pin, INPUT_PULLDOWN);
 
   foundCamera_ = -1;
-  detectCount_ = 0;
   high3SinceMs_ = 0;
   high4SinceMs_ = 0;
   cam0Armed_ = false;
@@ -72,38 +81,38 @@ void VisionInference::startSearch() {
   phase_ = Phase::WaitDetect;
   enabled_ = true;
   Serial.printf(
-      "[VISION] START rising edge -> dual search; expect %u detects; "
-      "GPIO4 released\n",
-      static_cast<unsigned>(MissionConfig::kRequiredDetects));
+      "[VISION] START rising edge -> dual search (1 detect/session); "
+      "finds so far %u/%u; GPIO4 released\n",
+      static_cast<unsigned>(detectCount_),
+      static_cast<unsigned>(MissionConfig::kRequiredFinds));
 }
 
 void VisionInference::enable(bool on) {
   if (on) {
-    finishCooldownIfReady();
-    if (phase_ == Phase::Cooldown) {
-      const uint32_t elapsed = millis() - cooldownStartedMs_;
+    finishPostDetectIfReady();
+    if (phase_ == Phase::PostDetect) {
+      const uint32_t elapsed = millis() - postDetectStartedMs_;
       const uint32_t remaining =
-          (elapsed >= MissionConfig::kPiCooldownMs)
+          (elapsed >= MissionConfig::kPiIdleMs)
               ? 0
-              : (MissionConfig::kPiCooldownMs - elapsed);
-      Serial.printf("[VISION] waiting %lu ms Pi cooldown before START\n",
+              : (MissionConfig::kPiIdleMs - elapsed);
+      Serial.printf("[VISION] waiting %lu ms Pi idle before START\n",
                     static_cast<unsigned long>(remaining));
       delay(remaining);
-      armIdle();
+      rearmPins();
     } else if (phase_ != Phase::Idle) {
-      armIdle();
+      rearmPins();
     }
     startSearch();
   } else {
-    // poll() may already have entered Cooldown on the 2nd DETECT — do not
-    // reset the timer.
-    if (phase_ == Phase::Cooldown) {
+    // poll() may already have entered PostDetect on DETECT — keep the timer.
+    if (phase_ == Phase::PostDetect) {
       pinMode(kPiCam1StartPin, OUTPUT);
       digitalWrite(kPiCam1StartPin, LOW);
     } else if (phase_ == Phase::WaitDetect || foundCamera_ >= 0) {
-      enterCooldown();
+      enterPostDetect();
     } else {
-      armIdle();
+      rearmPins();
     }
   }
 }
@@ -123,20 +132,19 @@ void VisionInference::acceptDetect(int8_t camera, VisionDetectResult& out) {
   cam1Armed_ = false;
 
   Serial.printf(
-      "[VISION] DETECT_CAM%d (GPIO%d) — teletubby #%u/%u\n",
+      "[VISION] DETECT_CAM%d (GPIO%d) — teletubby #%u/%u (session done)\n",
       static_cast<int>(camera), camera == 0 ? 3 : 4,
       static_cast<unsigned>(detectCount_),
-      static_cast<unsigned>(MissionConfig::kRequiredDetects));
+      static_cast<unsigned>(MissionConfig::kRequiredFinds));
 
-  if (detectCount_ >= MissionConfig::kRequiredDetects) {
-    enterCooldown();
-  }
+  // One DETECT per START — Pi returns to idle; re-arm for next START if any.
+  enterPostDetect();
 }
 
 VisionDetectResult VisionInference::poll() {
   VisionDetectResult out;
 
-  finishCooldownIfReady();
+  finishPostDetectIfReady();
 
   if (pendingInject_) {
     pendingInject_ = false;

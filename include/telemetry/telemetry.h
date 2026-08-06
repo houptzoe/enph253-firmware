@@ -11,7 +11,7 @@ struct TelemetrySnapshot {
 };
 
 struct DriveSettings {
-  bool running = false;  // motors off until Start is pressed
+  bool running = true;  // armed at boot; SoftAP Stop still disables
   float leftBaseSpeed = 90.0f;
   float rightBaseSpeed = 90.0f;
   float maxSpeed = 150.0f;
@@ -29,6 +29,7 @@ class TelemetryServer {
   void poll();
 
   const DriveSettings& drive() const { return drive_; }
+  void setDriveRunning(bool running);
 
   VisionCommand takeVisionCommand();
 

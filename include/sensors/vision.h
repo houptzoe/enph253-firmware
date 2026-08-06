@@ -6,26 +6,29 @@
 
 // Dual-cam teletubby detections via Pi ↔ ESP GPIO handshake
 // (lib/ESP32-GPIO-HANDSHAKE.md), plus optional Serial/bench inject().
-// Pi pulses DETECT once per find and exits after MissionConfig::kRequiredDetects.
+// Each START yields one DETECT; Pi returns to idle. Second find = new START.
 
 struct VisionDetectResult {
   bool found = false;
   int8_t camera = -1;      // 0 = cam0 (GPIO3), 1 = cam1 (GPIO4), -1 = none
-  uint8_t detectCount = 0; // 1..kRequiredDetects after this pulse
+  uint8_t detectCount = 0; // 1..kRequiredFinds after this pulse (mission ordinal)
 };
 
 class VisionInference {
  public:
   void begin();
 
+  // Clear find count and re-arm GPIO4 LOW (call before a new mission).
+  void reset();
+
   // enable(true): START rising edge on Pi GPIO4, then release bus for DETECT_CAM1.
-  // enable(false): drive GPIO4 LOW (re-arm) after cooldown from last mission.
+  // enable(false): drive GPIO4 LOW (re-arm / leave idle). Does not clear find count.
   void enable(bool on);
   bool enabled() const { return enabled_; }
 
   VisionDetectResult poll();
 
-  // Detects accepted this mission (0 until first pulse).
+  // Finds accepted this mission across STARTs (0 until first pulse).
   uint8_t detectCount() const { return detectCount_; }
 
   // Bench inject without the Pi. camera: 0 or 1. Each inject counts as one find.
@@ -33,12 +36,13 @@ class VisionInference {
   void clearInject();
 
  private:
-  enum class Phase : uint8_t { Idle, WaitDetect, Cooldown };
+  enum class Phase : uint8_t { Idle, WaitDetect, PostDetect };
 
-  void armIdle();
+  void resetMission();
+  void rearmPins();
   void startSearch();
-  void enterCooldown();
-  void finishCooldownIfReady();
+  void enterPostDetect();
+  void finishPostDetectIfReady();
   void acceptDetect(int8_t camera, VisionDetectResult& out);
 
   Phase phase_ = Phase::Idle;
@@ -49,9 +53,9 @@ class VisionInference {
   uint8_t detectCount_ = 0;
 
   // A line only counts as a DETECT once the Pi has held it LOW at least once;
-  // both idle HIGH via pull-ups before mars-cv drives them. After each accept,
-  // that line is disarmed until LOW again so the rest of the 100 ms pulse
-  // is not counted twice.
+  // both may idle HIGH via pull-ups before mars-cv drives them. After each
+  // accept, that line is disarmed until LOW again so the rest of the 100 ms
+  // pulse is not counted twice.
   bool cam0Armed_ = false;
   bool cam1Armed_ = false;
   bool armWarned_ = false;
@@ -59,5 +63,5 @@ class VisionInference {
   uint32_t high3SinceMs_ = 0;
   uint32_t high4SinceMs_ = 0;
   uint32_t searchStartedMs_ = 0;
-  uint32_t cooldownStartedMs_ = 0;
+  uint32_t postDetectStartedMs_ = 0;
 };
