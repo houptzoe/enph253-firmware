@@ -4,6 +4,7 @@
 #include "arm/arm.h"
 #include "display/display.h"
 #include "hardware/pins.h"
+#include "ir/ir.h"
 #include "metal/metal.h"
 #include "motor/motor.h"
 #include "pid/pid.h"
@@ -11,9 +12,11 @@
 #include "sonar/sonar.h"
 #include "telemetry/telemetry.h"
 
-// Robot application — line-follows via tape-follow PID until the metal
-// detector fires, drives straight for a short approach, then runs the
-// pickup-arm sequence before resuming the line.
+// Robot application — line-follows via tape-follow PID, picks up on metal
+// until the second IMU ~180° turn, deploys the arm, then line-follows to the
+// IR beacon (band set by hardware switch) and pivots/halts.
+// Single IMU is on the claw: course yaw is frozen during pickup so claw
+// rotation does not count toward the chassis ~180° markers.
 
 static MotorDriver motors;
 static TapeFollowPid tapeFollow;
@@ -23,17 +26,61 @@ static MetalDetector metalDetector;
 static PickupArm arm;
 static UltrasonicSonar sonar;
 static ImuTracker imu;
+static IrSensor irSensor;
 
-enum class RobotMode { LineFollowing, ApproachAfterMetal, PickingUp };
+enum class RobotMode {
+  LineFollowing,
+  ApproachAfterMetal,
+  PickingUp,
+  IrPivot,  // right-wheel spin toward solar panel after IR beacon
+  Halted,
+};
 static RobotMode mode = RobotMode::LineFollowing;
+
+// Course timeline (line-follow drives motion; IMU only detects ~180° completes).
+enum class CoursePhase {
+  PreFirst180,    // metal on, cruise 90
+  AfterFirst180,  // metal on, ramp 135 during cooldown before second turn
+  PreSecond180,   // metal on, back to cruise 90; watch for second ~180
+  PostSecond180,  // arm deploy, then line-follow with IR until beacon
+};
+static CoursePhase coursePhase = CoursePhase::PreFirst180;
 
 static bool imuReady = false;
 static float imuLastYawDeg = 0.0f;
 static float imuTurnedDeg = 0.0f;
+// IMU rides on the claw: freeze course ~180° accumulation while the arm yaws
+// so claw motion (and mid-turn metal pickups) never counts as chassis turn.
+static bool courseYawFrozen = false;
+static float savedCourseYawDeg = 0.0f;
+// Wait until yaw stops drifting, then lock that heading as course origin (0).
+static bool imuCourseOriginLocked = false;
+static float imuSettleRefYawDeg = 0.0f;
+static uint32_t imuSettleStableSinceMs = 0;
+static uint32_t imuSettleWatchStartMs = 0;
+static constexpr float kImuSettleTolDeg = 2.5f;       // max wander while "stable"
+static constexpr uint32_t kImuSettleHoldMs = 1500;    // must hold that long
+static constexpr uint32_t kImuSettleTimeoutMs = 12000; // force-lock if never quiet
+
+
+static bool metalEnabled = false;  // TEST: metal detectors disengaged
+static bool secondTurnArmed = false;
+static uint32_t secondTurnArmAfterMs = 0;
+
+static float irHz = 0.0f;
+static bool irHighBand = false;
 
 static MetalSide pendingPickupSide = MetalSide::None;
 static uint32_t approachStartMs = 0;
+static uint32_t irPivotStartMs = 0;
+static constexpr float kCruiseBaseSpeed = 90.0f;
+static constexpr float kRampBaseSpeed = 135.0f;
+static constexpr float kIrPivotSpeed = 90.0f;
+static constexpr uint32_t kIrPivotMs = 2000;
 static constexpr uint32_t kMetalApproachMs = 1800;
+static constexpr float kTurnDetectDeg = 165.0f;
+static constexpr float kSecondTurnRearmDeg = 30.0f;
+static constexpr uint32_t kSecondTurnCooldownMs = 4000;
 
 namespace {
 
@@ -52,7 +99,35 @@ void resetImuTurnTracking(float currentYawDeg) {
   imuTurnedDeg = 0.0f;
 }
 
-// Updates IMU turn accumulation; returns true when a new sample was fused.
+void freezeCourseYawForPickup() {
+  savedCourseYawDeg = imuTurnedDeg;
+  courseYawFrozen = true;
+  Serial.printf("[IMU] course yaw frozen at %.1f deg (claw moving)\n",
+                savedCourseYawDeg);
+}
+
+void unfreezeCourseYawAfterPickup() {
+  imuTurnedDeg = savedCourseYawDeg;
+  courseYawFrozen = false;
+  // imuLastYawDeg already tracks current claw pose from updates during pickup;
+  // with claw back near home, further dyaw is chassis motion again.
+  Serial.printf("[IMU] course yaw restored to %.1f deg\n", imuTurnedDeg);
+}
+
+void lockImuCourseOrigin(float settledYawDeg, bool timedOut) {
+  imu.resetPose();  // settled heading becomes reported 0
+  imuTurnedDeg = 0.0f;
+  imuLastYawDeg = 0.0f;
+  imuCourseOriginLocked = true;
+  Serial.printf("[IMU] course origin locked at settled yaw %.1f deg%s\n",
+                settledYawDeg, timedOut ? " (timeout)" : "");
+  reflectanceDisplay.showMessage(
+      timedOut ? "IMU lock (timeout)" : "IMU settled", "ok to drive");
+}
+
+// Updates IMU; course accumulator only advances when not frozen for pickup.
+// Until yaw settles at boot, drift is ignored — the settled heading becomes
+// the start (0) for all ~180° course measurements.
 bool updateImuTurnTracking() {
   if (!imuReady) {
     return false;
@@ -63,10 +138,108 @@ bool updateImuTurnTracking() {
     return false;
   }
 
+  if (!imuCourseOriginLocked) {
+    const float deltaFromRef =
+        fabsf(wrapDeltaDeg(pose.yawDeg - imuSettleRefYawDeg));
+    if (deltaFromRef > kImuSettleTolDeg) {
+      imuSettleRefYawDeg = pose.yawDeg;
+      imuSettleStableSinceMs = millis();
+    }
+
+    const bool heldLongEnough =
+        (millis() - imuSettleStableSinceMs) >= kImuSettleHoldMs;
+    const bool timedOut =
+        (millis() - imuSettleWatchStartMs) >= kImuSettleTimeoutMs;
+
+    if (heldLongEnough || timedOut) {
+      lockImuCourseOrigin(pose.yawDeg, timedOut && !heldLongEnough);
+    } else {
+      // Do not count boot drift as course turn; keep OLED near 0.
+      imuTurnedDeg = 0.0f;
+      imuLastYawDeg = pose.yawDeg;
+    }
+    return true;
+  }
+
   const float dyaw = wrapDeltaDeg(pose.yawDeg - imuLastYawDeg);
   imuLastYawDeg = pose.yawDeg;
-  imuTurnedDeg += dyaw;
+  if (!courseYawFrozen) {
+    // Before the first drive, ignore parked drift so it cannot false-trigger 165°.
+    if (!telemetry.drive().running &&
+        coursePhase == CoursePhase::PreFirst180) {
+      imuTurnedDeg = 0.0f;
+      imuLastYawDeg = pose.yawDeg;
+    } else {
+      imuTurnedDeg += dyaw;
+    }
+  }
   return true;
+}
+
+const char* coursePhaseName(CoursePhase phase) {
+  switch (phase) {
+    case CoursePhase::PreFirst180:   return "PreFirst180";
+    case CoursePhase::AfterFirst180: return "AfterFirst180";
+    case CoursePhase::PreSecond180:  return "PreSecond180";
+    case CoursePhase::PostSecond180: return "PostSecond180";
+    default:                         return "?";
+  }
+}
+
+void enterPostSecond180() {
+  coursePhase = CoursePhase::PostSecond180;
+  metalEnabled = false;
+  irSensor.setEnabled(false);  // enable after arm deploy, then line-follow to IR
+  motors.stop();
+  reflectanceDisplay.showMessage("2nd 180 done", "arm deploy");
+  arm.startPostCourseDeploy();
+  mode = RobotMode::PickingUp;
+  Serial.println(F("[COURSE] PostSecond180 — stop for arm deploy, then IR run"));
+}
+
+// Advances course phases from IMU yaw while line-following (not mid-pickup).
+// Hitting ~165° deliberately resets the turn accumulator to measure the next
+// leg — that is not a sensor glitch. Detection only runs while motors are on.
+void updateCoursePhaseFromImu() {
+  if (!imuReady || !imuCourseOriginLocked) {
+    return;
+  }
+  if (!telemetry.drive().running) {
+    return;
+  }
+
+  const float turned = fabsf(imuTurnedDeg);
+
+  if (coursePhase == CoursePhase::PreFirst180 && turned >= kTurnDetectDeg) {
+    coursePhase = CoursePhase::AfterFirst180;
+    secondTurnArmed = false;
+    secondTurnArmAfterMs = millis() + kSecondTurnCooldownMs;
+    resetImuTurnTracking(imuLastYawDeg);  // start next-leg measure from 0
+    telemetry.setBaseSpeeds(kRampBaseSpeed, kRampBaseSpeed);
+    Serial.printf("[COURSE] %s — first ~180 (%.1f deg), ramp speed %.0f\n",
+                  coursePhaseName(coursePhase), turned, kRampBaseSpeed);
+    return;
+  }
+
+  if (coursePhase == CoursePhase::AfterFirst180) {
+    // Rearm second-turn watch after cooldown and yaw has settled near zero.
+    if (!secondTurnArmed && millis() >= secondTurnArmAfterMs &&
+        turned <= kSecondTurnRearmDeg) {
+      secondTurnArmed = true;
+      coursePhase = CoursePhase::PreSecond180;
+      resetImuTurnTracking(imuLastYawDeg);
+      telemetry.setBaseSpeeds(kCruiseBaseSpeed, kCruiseBaseSpeed);  // end ramp
+      Serial.printf("[COURSE] %s — metal still ON, cruise %.0f\n",
+                    coursePhaseName(coursePhase), kCruiseBaseSpeed);
+    }
+    return;
+  }
+
+  if (coursePhase == CoursePhase::PreSecond180 && turned >= kTurnDetectDeg) {
+    Serial.printf("[COURSE] second ~180 done (%.1f deg)\n", turned);
+    enterPostSecond180();
+    resetImuTurnTracking(imuLastYawDeg);
+  }
 }
 
 }  // namespace
@@ -84,9 +257,10 @@ static void initTapeFollow() {
   config.samplePeriodUs = 2000;
   config.samplesPerUpdate = 5;  // still ~100 Hz control
   // Gains sized for low base speed (was kp=80, which overpowered cruise).
-  config.kp = 25.0f;
-  //config.ki = 0.8f;
-  //config.kd = 4.0f;
+  // Explicit zeros required — TapeFollowConfig defaults are kp=45, kd=10.
+  config.kp = 45.0f;
+  config.ki = 0.0f;
+  config.kd = 15.0f;
   config.integralMax = 10.0f;
   tapeFollow.begin(config);
 }
@@ -100,7 +274,7 @@ static void initMetalDetector() {
   config.thresholdLeftHz = 400.0f;      // Tune on hardware.
   config.thresholdRightHz = 400.0f;     // Tune on hardware.
   config.enableRightDetector = true;
-  config.baselineDurationMs = 3000;     // 3 s no-metal baseline at boot.
+  config.baselineDurationMs = 1500;     // 1.5 s no-metal baseline at boot.
   metalDetector.begin(config);
 }
 
@@ -125,13 +299,20 @@ static void initArm() {
   config.sonarDetectMinCm = 4.0f;
   config.postScanYawAdjustMs = 500;
   config.rotateScanMaxSteps = 1200;
-  // Recenter: Left 1/4, Right 5/8 of total yaw.
-  config.recenterLeftNum = 1;
-  config.recenterLeftDen = 4;
-  config.recenterRightNum = 5;
-  config.recenterRightDen = 8;
+  config.homeYawToleranceDeg = 4.0f;  // stop when |yaw - home| within this
+  config.recenterMaxSteps = 2500;     // safety if IMU never locks
+  config.postCourseLeftYawSteps = 350;  // ~90° left — tune on hardware
 
-  arm.begin(config, &sonar, &reflectanceDisplay);
+  arm.begin(config, &sonar, &reflectanceDisplay, &imu);
+}
+
+static void initIr() {
+  IrConfig config;
+  config.sensePin = kIrDetectorPin;
+  config.switchPin = kIrSwitchPin;
+  config.gateTimeMs = 100;
+  irSensor.begin(config);
+  // Enabled only after PostSecond180.
 }
 
 static void initSonar() {
@@ -164,7 +345,11 @@ static void initImu() {
   imu.update(pose);
   resetImuTurnTracking(pose.yawDeg);
   imuReady = true;
-  Serial.println(F("[IMU] Ready — turn angle shown on OLED"));
+  imuCourseOriginLocked = false;
+  imuSettleRefYawDeg = pose.yawDeg;
+  imuSettleStableSinceMs = millis();
+  imuSettleWatchStartMs = millis();
+  Serial.println(F("[IMU] Ready — waiting for yaw to settle as course origin"));
 }
 
 // ---------------------------------------------------------------------------
@@ -193,9 +378,9 @@ static void runLineFollowing() {
 
     if (drive.running) {
       // Differential drive: add correction to left, subtract from right.
-      leftSpeed = constrain(drive.leftBaseSpeed + state.correction, 0.0f,
+      leftSpeed = constrain(drive.leftBaseSpeed - state.correction, 0.0f,
                             drive.maxSpeed);
-      rightSpeed = constrain(drive.rightBaseSpeed - state.correction, 0.0f,
+      rightSpeed = constrain(drive.rightBaseSpeed + state.correction, 0.0f,
                              drive.maxSpeed);
       motors.applyDrive(leftSpeed, rightSpeed);
     } else {
@@ -234,7 +419,8 @@ static void runLineFollowing() {
     metalRightHit = metalState.rightHit;
     oledDirty = true;
 
-    if (telemetry.drive().running && metalState.side != MetalSide::None) {
+    if (metalEnabled && telemetry.drive().running &&
+        metalState.side != MetalSide::None) {
       const bool left = metalState.side == MetalSide::Left;
       const float baselineHz =
           left ? metalState.baselineLeft : metalState.baselineRight;
@@ -262,16 +448,38 @@ static void runLineFollowing() {
     oledDirty = true;
   }
 
+  IrState irState;
+  if (irSensor.update(irState)) {
+    irHz = irState.hz;
+    irHighBand = (irState.band == IrBand::High);
+    oledDirty = true;
+
+    if (irState.beaconDetected) {
+      motors.stop();
+      irPivotStartMs = millis();
+      mode = RobotMode::IrPivot;
+      Serial.printf("[IR] beacon %.0f Hz (%s) — right-wheel pivot %lu ms\n",
+                    irState.hz, irHighBand ? "Hi" : "Lo",
+                    static_cast<unsigned long>(kIrPivotMs));
+      reflectanceDisplay.showMessage("IR beacon", "pivot R");
+      return;
+    }
+  }
+
   if (updateImuTurnTracking()) {
     oledDirty = true;
+    updateCoursePhaseFromImu();
+    if (mode != RobotMode::LineFollowing) {
+      return;  // second 180 → halted arm deploy
+    }
   }
 
   if (oledDirty) {
     oledDirty = false;
-    reflectanceDisplay.showStatus(leftHz, rightHz, baselineLeft, baselineRight,
-                                  metalLeftHit, metalRightHit, leftAnalog,
-                                  rightAnalog, distanceCm, distanceValid,
-                                  imuTurnedDeg);
+    reflectanceDisplay.showStatus(
+        leftHz, rightHz, baselineLeft, baselineRight, metalLeftHit,
+        metalRightHit, leftAnalog, rightAnalog, distanceCm, distanceValid,
+        imuTurnedDeg, irSensor.isEnabled(), irHz, irHighBand);
   }
 }
 
@@ -317,8 +525,23 @@ static void runApproachAfterMetal() {
 
   motors.stop();
   Serial.println(F("[METAL] approach done — starting pickup"));
-  arm.startPickup(pendingPickupSide);
+  freezeCourseYawForPickup();
+  // Record claw IMU yaw now (still at home) before any arm rotation.
+  arm.startPickup(pendingPickupSide, imuLastYawDeg, imuReady);
   mode = RobotMode::PickingUp;
+}
+
+static void runIrPivot() {
+  // No line-follow — left stopped, right forward at kIrPivotSpeed for kIrPivotMs.
+  if (millis() - irPivotStartMs < kIrPivotMs) {
+    motors.applyDrive(0.0f, kIrPivotSpeed);
+    return;
+  }
+
+  motors.stop();
+  Serial.println(F("[IR] pivot done — HALT (hook / takeoff)"));
+  reflectanceDisplay.showMessage("IR pivot done", "HALT");
+  mode = RobotMode::Halted;
 }
 
 static void runPickingUp() {
@@ -334,12 +557,23 @@ static void runPickingUp() {
     // OLED left on the metal-hit screen (baseline + delta) while the arm moves.
   }
 
+  // Course phase stays frozen during metal pickup; still fuse IMU.
   updateImuTurnTracking();
 
   if (done) {
+    lastShownPhase = PickupPhase::Idle;
+    if (arm.isPostCourseDeploy()) {
+      irSensor.setEnabled(true);
+      telemetry.setBaseSpeeds(kCruiseBaseSpeed, kCruiseBaseSpeed);
+      tapeFollow.reset();
+      Serial.println(F("[ARM] post-course deploy done — line-follow, IR ON"));
+      reflectanceDisplay.showMessage("Arm deployed", "IR hunt");
+      mode = RobotMode::LineFollowing;
+      return;
+    }
+    unfreezeCourseYawAfterPickup();
     Serial.println("[ARM] pickup complete, resuming line following");
     tapeFollow.reset();  // clear any PID windup accumulated while paused
-    lastShownPhase = PickupPhase::Idle;
     mode = RobotMode::LineFollowing;
   }
 }
@@ -366,16 +600,20 @@ void setup() {
   initMetalDetector();
   initSonar();
   initArm();
+  initIr();
 
   // Metal-detector baseline must be taken with the robot stationary and away
-  // from any metal target. Blocks for baselineDurationMs (~3 s) before any
+  // from any metal target. Blocks for baselineDurationMs (~1.5 s) before any
   // hit detection or line following can run — motors stay stopped the whole time.
-  reflectanceDisplay.showMessage("Baseline 3s", "stand still");
+  reflectanceDisplay.showMessage("Baseline 1.5s", "stand still");
   metalDetector.calibrate();
 
   initImu();
-  reflectanceDisplay.showMessage("Baseline OK", "ready to drive");
+  reflectanceDisplay.showMessage("IMU settling", "wait for lock");
 
+  coursePhase = CoursePhase::PreFirst180;
+  metalEnabled = false;  // TEST: metal detectors disengaged
+  secondTurnArmed = false;
   mode = RobotMode::LineFollowing;
 }
 
@@ -384,8 +622,13 @@ void loop() {
     runLineFollowing();
   } else if (mode == RobotMode::ApproachAfterMetal) {
     runApproachAfterMetal();
-  } else {
+  } else if (mode == RobotMode::PickingUp) {
     runPickingUp();
+  } else if (mode == RobotMode::IrPivot) {
+    runIrPivot();
+  } else {
+    // Halted after IR pivot — stay stopped for hook / takeoff.
+    motors.stop();
   }
 
   telemetry.poll();

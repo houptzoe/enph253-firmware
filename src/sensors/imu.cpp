@@ -80,7 +80,8 @@ float ImuTracker::yawDegFromQuat() const {
 }
 
 void ImuTracker::resetPose() {
-  yawOffsetDeg_ = wrapDeg180(yawOffsetDeg_ + yawDegFromQuat());
+  // Make reported yaw 0 at the current orientation (safe to call more than once).
+  yawOffsetDeg_ = yawDegFromQuat();
   velX_ = velY_ = velZ_ = 0.0f;
   posX_ = posY_ = posZ_ = 0.0f;
 }

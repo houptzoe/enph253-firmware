@@ -10,7 +10,8 @@ class ReflectanceDisplay {
   void showStatus(float leftHz, float rightHz, float baselineLeft,
                   float baselineRight, bool metalLeftHit, bool metalRightHit,
                   int leftAnalog, int rightAnalog, float distanceCm,
-                  bool distanceValid, float turnedDeg);
+                  bool distanceValid, float turnedDeg, bool irEnabled = false,
+                  float irHz = 0.0f, bool irHighBand = false);
   void showMetalHit(char side, float baselineHz, float deltaHz);
   void showMessage(const char* line1, const char* line2 = "");
   // Live HC-SR04 reading while RotateScan is aiming.

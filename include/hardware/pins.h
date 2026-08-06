@@ -11,14 +11,15 @@ constexpr int kRightReflectancePin = 2;
 // Drive motors — two-wire H-bridge: PWM the active direction pin per side.
 // Left:  pwmL0 forward (GPIO 3), pwmL1 reverse (GPIO 4)
 // Right: pwmR0 forward (GPIO 5), pwmR1 reverse (GPIO 6)
-constexpr int kLeftMotorPwm0Pin = 3;
-constexpr int kLeftMotorPwm1Pin = 4;
-constexpr int kRightMotorPwm0Pin = 5;
-constexpr int kRightMotorPwm1Pin = 6;
+constexpr int kLeftMotorPwm0Pin = 5;
+constexpr int kLeftMotorPwm1Pin = 6;
+constexpr int kRightMotorPwm0Pin = 3;
+constexpr int kRightMotorPwm1Pin = 4;
 
-// IR detector — GPIO 7 (ADC1_CH6)
-constexpr int kIrDetectorPin = 7;
-constexpr int kIrSwitchPin = 18; 
+// IR detector — sense (freq) GPIO 7, band switch GPIO 18
+// Switch HIGH → low band (0–4 kHz); LOW → high band (6–12 kHz).
+constexpr int kIrDetectorPin = 18;
+constexpr int kIrSwitchPin = 7; 
 
 // HC-SR04 ultrasonic — trigger GPIO 8, echo GPIO 9
 constexpr int kSonarTrigPin = 8;

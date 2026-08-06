@@ -24,6 +24,7 @@ class TelemetryServer {
   void poll();
 
   const DriveSettings& drive() const { return drive_; }
+  void setBaseSpeeds(float left, float right);
 
  private:
   void handleRoot();

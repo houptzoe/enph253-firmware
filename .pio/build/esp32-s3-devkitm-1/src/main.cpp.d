@@ -196,5 +196,6 @@
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/driver/include/driver/mcpwm.h \
  C:/Users/Owner/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/mcpwm_types.h \
  include/hardware/pins.h include/metal/metal.h include/display/display.h \
- include/motor/motor.h include/pid/pid.h include/sensors/imu.h \
- include/sonar/sonar.h include/telemetry/telemetry.h
+ include/ir/ir.h include/motor/motor.h include/pid/pid.h \
+ include/sensors/imu.h include/sonar/sonar.h \
+ include/telemetry/telemetry.h

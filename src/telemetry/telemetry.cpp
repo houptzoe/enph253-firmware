@@ -208,6 +208,11 @@ void TelemetryServer::updateSnapshot(const TelemetrySnapshot& snapshot) {
   snapshot_ = snapshot;
 }
 
+void TelemetryServer::setBaseSpeeds(float left, float right) {
+  drive_.leftBaseSpeed = constrain(left, 0.0f, drive_.maxSpeed);
+  drive_.rightBaseSpeed = constrain(right, 0.0f, drive_.maxSpeed);
+}
+
 void TelemetryServer::poll() {
   server.handleClient();
 

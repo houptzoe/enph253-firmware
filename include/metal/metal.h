@@ -18,7 +18,7 @@ struct MetalDetectorConfig {
   float thresholdLeftHz = 400.0f;        // freq rise above baseline for left hit
   float thresholdRightHz = 400.0f;       // freq rise above baseline for right hit
   bool enableRightDetector = true;       // right coil enabled
-  uint32_t baselineDurationMs = 3000;  // no-metal averaging window at boot
+  uint32_t baselineDurationMs = 1500;  // no-metal averaging window at boot
 };
 
 // Latest frequency readings and hit classification, produced each gate close.

@@ -1,17 +1,33 @@
 #include "arm/arm.h"
 
 #include "display/display.h"
+#include "sensors/imu.h"
 #include "sonar/sonar.h"
+
+namespace {
+
+float wrapDeltaDeg(float deg) {
+  while (deg > 180.0f) {
+    deg -= 360.0f;
+  }
+  while (deg < -180.0f) {
+    deg += 360.0f;
+  }
+  return deg;
+}
+
+}  // namespace
 
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
 void PickupArm::begin(const PickupArmConfig& config, UltrasonicSonar* sonar,
-                      ReflectanceDisplay* display) {
+                      ReflectanceDisplay* display, ImuTracker* imu) {
   config_ = config;
   sonar_ = sonar;
   display_ = display;
+  imu_ = imu;
 
   pinMode(config_.rotationDirPin, OUTPUT);
   pinMode(config_.rotationStepPin, OUTPUT);
@@ -133,6 +149,73 @@ int PickupArm::rotateForDurationMs(bool dir, uint32_t durationMs) {
   return taken;
 }
 
+int PickupArm::rotateUntilHomeYaw(float homeYawDeg, int maxSteps) {
+  // Drive solely from signed angle error vs home (not metal side / step counts).
+  // rightShrinksPositiveErr maps err>0 → which DIR pin shrinks that error.
+  bool rightShrinksPositiveErr = true;
+  bool polarityKnown = false;
+  float prevAbsErr = 1e9f;
+  int sinceCheck = 0;
+
+  int taken = 0;
+  for (; taken < maxSteps; taken++) {
+    if (imu_ == nullptr) {
+      break;
+    }
+
+    ImuPose pose;
+    const bool gotSample = imu_->update(pose);
+    if (gotSample) {
+      const float err = wrapDeltaDeg(pose.yawDeg - homeYawDeg);
+      const float absErr = fabsf(err);
+      if (absErr <= config_.homeYawToleranceDeg) {
+        Serial.printf("[ARM] home yaw lock err=%.1f deg after %d steps "
+                      "(yaw=%.1f home=%.1f)\n",
+                      absErr, taken, pose.yawDeg, homeYawDeg);
+        return taken;
+      }
+
+      if (!polarityKnown) {
+        // Tentative map; corrected below if |err| grows.
+        rightShrinksPositiveErr = true;
+        polarityKnown = true;
+        prevAbsErr = absErr;
+        sinceCheck = 0;
+      } else {
+        sinceCheck++;
+        if (sinceCheck >= 16) {
+          if (absErr > prevAbsErr + 0.5f) {
+            rightShrinksPositiveErr = !rightShrinksPositiveErr;
+            Serial.println(F("[ARM] recenter polarity flipped"));
+          }
+          prevAbsErr = absErr;
+          sinceCheck = 0;
+        }
+      }
+
+      const bool useRight =
+          (err > 0.0f) ? rightShrinksPositiveErr : !rightShrinksPositiveErr;
+      const bool dir =
+          useRight ? config_.rotateDirRight : config_.rotateDirLeft;
+
+      digitalWrite(config_.rotationDirPin, dir ? HIGH : LOW);
+      delayMicroseconds(10);
+    } else if (!polarityKnown) {
+      continue;
+    }
+    // else: keep last DIR and step through a missed sample
+
+    digitalWrite(config_.rotationStepPin, HIGH);
+    delayMicroseconds(config_.rotationStepDelayUs);
+    digitalWrite(config_.rotationStepPin, LOW);
+    delayMicroseconds(config_.rotationStepDelayUs);
+  }
+
+  Serial.printf("[ARM] recenter hit max steps (%d) without home lock\n",
+                maxSteps);
+  return taken;
+}
+
 void PickupArm::setGripperOpen() { gripper_.write(config_.servoOpenDeg); }
 void PickupArm::setGripperClosed() { gripper_.write(config_.servoClosedDeg); }
 
@@ -140,15 +223,43 @@ void PickupArm::setGripperClosed() { gripper_.write(config_.servoClosedDeg); }
 // Sequence control
 // ---------------------------------------------------------------------------
 
-void PickupArm::startPickup(MetalSide side) {
+void PickupArm::startPickup(MetalSide side, float homeYawDeg,
+                            bool homeYawValid) {
   if (isBusy()) {
     return;
   }
   side_ = side;
+  postCourseDeploy_ = false;
   extendStepsTaken_ = 0;
   initialExtendSteps_ = 0;
   rotateStepsTaken_ = 0;
   stowRaiseSteps_ = 0;
+  homeYawDeg_ = homeYawDeg;
+  homeYawValid_ = homeYawValid;
+  if (homeYawValid_) {
+    Serial.printf("[ARM] pickup home yaw = %.1f deg\n", homeYawDeg_);
+  } else {
+    Serial.println(F("[ARM] pickup with no home yaw — step fallback recenter"));
+  }
+  phase_ = PickupPhase::InitialExtend;
+}
+
+void PickupArm::startPostCourseDeploy() {
+  if (isBusy()) {
+    return;
+  }
+  side_ = MetalSide::Left;  // ~90° uses rotateDirLeft
+  postCourseDeploy_ = true;
+  extendStepsTaken_ = 0;
+  initialExtendSteps_ = 0;
+  rotateStepsTaken_ = 0;
+  stowRaiseSteps_ = 0;
+  homeYawValid_ = false;
+  setGripperOpen();
+  Serial.printf("[ARM] post-course deploy: extend %d → yaw %d left → "
+                "lower %d → extend to %d\n",
+                config_.initialExtendSteps, config_.postCourseLeftYawSteps,
+                config_.lowerSteps, config_.maxExtendSteps);
   phase_ = PickupPhase::InitialExtend;
 }
 
@@ -169,6 +280,17 @@ bool PickupArm::update(PickupPhase& phaseOut) {
       break;
 
     case PickupPhase::Rotate: {
+      if (postCourseDeploy_) {
+        // ~90° toward robot-left (same step count as former face-left).
+        Serial.printf("[ARM] post-course yaw left %d steps\n",
+                      config_.postCourseLeftYawSteps);
+        stepAxis(config_.rotationStepPin, config_.rotationDirPin,
+                  config_.rotateDirLeft, config_.postCourseLeftYawSteps,
+                  config_.rotationStepDelayUs);
+        rotateStepsTaken_ += config_.postCourseLeftYawSteps;
+        phase_ = PickupPhase::Lower;
+        break;
+      }
       const bool dir = (side_ == MetalSide::Left) ? config_.rotateDirLeft
                                                     : config_.rotateDirRight;
       Serial.printf("[ARM] Rotate side=%s dir=%d\n",
@@ -188,7 +310,11 @@ bool PickupArm::update(PickupPhase& phaseOut) {
                 config_.lowerDirDown, config_.lowerSteps,
                 config_.verticalStepDelayUs);
       stowRaiseSteps_ = config_.raiseSteps;
-      phase_ = PickupPhase::RotateScan;
+      if (postCourseDeploy_) {
+        phase_ = PickupPhase::Extend;
+      } else {
+        phase_ = PickupPhase::RotateScan;
+      }
       break;
 
     case PickupPhase::RotateScan: {
@@ -224,7 +350,12 @@ bool PickupArm::update(PickupPhase& phaseOut) {
       }
       Serial.printf("[ARM] extend done total=%d / max=%d\n", extendStepsTaken_,
                     config_.maxExtendSteps);
-      phase_ = PickupPhase::Grip;
+      if (postCourseDeploy_) {
+        Serial.println(F("[ARM] post-course deploy complete — holding"));
+        phase_ = PickupPhase::Done;
+      } else {
+        phase_ = PickupPhase::Grip;
+      }
       break;
     }
 
@@ -253,21 +384,26 @@ bool PickupArm::update(PickupPhase& phaseOut) {
       break;
 
     case PickupPhase::Recenter: {
-      const bool dir = (side_ == MetalSide::Left) ? config_.rotateDirRight
-                                                    : config_.rotateDirLeft;
-      const int steps =
-          (side_ == MetalSide::Left)
-              ? (rotateStepsTaken_ * config_.recenterLeftNum) /
-                    config_.recenterLeftDen
-              : (rotateStepsTaken_ * config_.recenterRightNum) /
-                    config_.recenterRightDen;
-      if (steps > 0) {
+      int steps = 0;
+      if (homeYawValid_ && imu_ != nullptr) {
+        // Stop when |yaw - home| is small; dir chosen from signed error only.
+        const int maxSteps =
+            (rotateStepsTaken_ * 2 > config_.recenterMaxSteps)
+                ? (rotateStepsTaken_ * 2)
+                : config_.recenterMaxSteps;
+        steps = rotateUntilHomeYaw(homeYawDeg_, maxSteps);
+        Serial.printf("[ARM] IMU recenter %d steps (home=%.1f)\n", steps,
+                      homeYawDeg_);
+      } else if (rotateStepsTaken_ > 0) {
+        const bool dir = (side_ == MetalSide::Left) ? config_.rotateDirRight
+                                                      : config_.rotateDirLeft;
+        steps = rotateStepsTaken_;
         stepAxis(config_.rotationStepPin, config_.rotationDirPin, dir, steps,
                   config_.rotationStepDelayUs);
+        Serial.printf("[ARM] step fallback recenter %d yaw steps\n", steps);
       }
-      Serial.printf("[ARM] recenter %d / %d yaw steps\n", steps,
-                    rotateStepsTaken_);
       rotateStepsTaken_ = 0;
+      homeYawValid_ = false;
       phase_ = PickupPhase::RetractInitial;
       break;
     }

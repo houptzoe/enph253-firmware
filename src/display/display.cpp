@@ -36,7 +36,8 @@ void ReflectanceDisplay::showStatus(float leftHz, float rightHz,
                                     bool metalLeftHit, bool metalRightHit,
                                     int leftAnalog, int rightAnalog,
                                     float distanceCm, bool distanceValid,
-                                    float turnedDeg) {
+                                    float turnedDeg, bool irEnabled,
+                                    float irHz, bool irHighBand) {
   const uint32_t nowMs = millis();
   if (nowMs - lastUpdateMs_ < kMinUpdateMs) {
     return;
@@ -57,12 +58,16 @@ void ReflectanceDisplay::showStatus(float leftHz, float rightHz,
 
   display.setCursor(0, 24);
   display.print(F("Metal: "));
-  if (metalLeftHit && metalRightHit) {
-    display.print(F("L R"));
-  } else if (metalLeftHit) {
-    display.print(F("L"));
-  } else if (metalRightHit) {
-    display.print(F("R"));
+  if (!irEnabled && (metalLeftHit || metalRightHit)) {
+    if (metalLeftHit && metalRightHit) {
+      display.print(F("L R"));
+    } else if (metalLeftHit) {
+      display.print(F("L"));
+    } else {
+      display.print(F("R"));
+    }
+  } else if (irEnabled) {
+    display.print(F("off"));
   } else {
     display.print(F("-"));
   }
@@ -71,7 +76,9 @@ void ReflectanceDisplay::showStatus(float leftHz, float rightHz,
   display.printf("Ref L:%4d R:%4d", leftAnalog, rightAnalog);
 
   display.setCursor(0, 40);
-  if (distanceValid) {
+  if (irEnabled) {
+    display.printf("IR:%.0fHz %s", irHz, irHighBand ? "Hi" : "Lo");
+  } else if (distanceValid) {
     display.printf("Dist: %.1f cm", distanceCm);
   } else {
     display.print(F("Dist: ----"));
