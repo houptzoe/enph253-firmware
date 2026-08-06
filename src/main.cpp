@@ -40,8 +40,8 @@ static RobotMode mode = RobotMode::LineFollowing;
 // Course timeline (line-follow drives motion; IMU only detects ~180° completes).
 enum class CoursePhase {
   PreFirst180,    // metal on, cruise 90
-  AfterFirst180,  // metal on, ramp 135 during cooldown before second turn
-  PreSecond180,   // metal on, back to cruise 90; watch for second ~180
+  AfterFirst180,  // ramp 135 for 4.5 s; R→90 then L→90 (+0.2 s); keep line-following
+  PreSecond180,   // metal on, cruise 90; watch for second ~180
   PostSecond180,  // arm deploy, then line-follow with IR until beacon
 };
 static CoursePhase coursePhase = CoursePhase::PreFirst180;
@@ -66,6 +66,10 @@ static constexpr uint32_t kImuSettleTimeoutMs = 12000; // force-lock if never qu
 static bool metalEnabled = false;  // TEST: metal detectors disengaged
 static bool secondTurnArmed = false;
 static uint32_t secondTurnArmAfterMs = 0;
+// After ramp: right drops to cruise first, left follows 200 ms later.
+static bool rampStaggerStarted = false;
+static bool rampStaggerDone = false;
+static uint32_t rampLeftCatchUpAtMs = 0;
 
 static float irHz = 0.0f;
 static bool irHighBand = false;
@@ -78,9 +82,12 @@ static constexpr float kRampBaseSpeed = 135.0f;
 static constexpr float kIrPivotSpeed = 90.0f;
 static constexpr uint32_t kIrPivotMs = 2000;
 static constexpr uint32_t kMetalApproachMs = 1800;
-static constexpr float kTurnDetectDeg = 165.0f;
+static constexpr float kTurnDetectDeg = 165.0f;       // second ~180
+static constexpr float kFirstTurnDetectDeg = 160.0f;  // start ramp early on first turn
 static constexpr float kSecondTurnRearmDeg = 30.0f;
-static constexpr uint32_t kSecondTurnCooldownMs = 4000;
+static constexpr uint32_t kSecondTurnCooldownMs = 4500;  // AfterFirst180 ramp duration
+static constexpr uint32_t kRampStaggerMs = 200;       // left catches cruise after right
+
 
 namespace {
 
@@ -210,27 +217,47 @@ void updateCoursePhaseFromImu() {
 
   const float turned = fabsf(imuTurnedDeg);
 
-  if (coursePhase == CoursePhase::PreFirst180 && turned >= kTurnDetectDeg) {
+  if (coursePhase == CoursePhase::PreFirst180 &&
+      turned >= kFirstTurnDetectDeg) {
     coursePhase = CoursePhase::AfterFirst180;
     secondTurnArmed = false;
     secondTurnArmAfterMs = millis() + kSecondTurnCooldownMs;
+    rampStaggerStarted = false;
+    rampStaggerDone = false;
     resetImuTurnTracking(imuLastYawDeg);  // start next-leg measure from 0
     telemetry.setBaseSpeeds(kRampBaseSpeed, kRampBaseSpeed);
-    Serial.printf("[COURSE] %s — first ~180 (%.1f deg), ramp speed %.0f\n",
-                  coursePhaseName(coursePhase), turned, kRampBaseSpeed);
+    Serial.printf("[COURSE] %s — first turn >=%.0f (%.1f deg), ramp %.0f for %lu ms\n",
+                  coursePhaseName(coursePhase), kFirstTurnDetectDeg, turned,
+                  kRampBaseSpeed,
+                  static_cast<unsigned long>(kSecondTurnCooldownMs));
     return;
   }
 
   if (coursePhase == CoursePhase::AfterFirst180) {
-    // Rearm second-turn watch after cooldown and yaw has settled near zero.
-    if (!secondTurnArmed && millis() >= secondTurnArmAfterMs &&
-        turned <= kSecondTurnRearmDeg) {
-      secondTurnArmed = true;
-      coursePhase = CoursePhase::PreSecond180;
-      resetImuTurnTracking(imuLastYawDeg);
-      telemetry.setBaseSpeeds(kCruiseBaseSpeed, kCruiseBaseSpeed);  // end ramp
-      Serial.printf("[COURSE] %s — metal still ON, cruise %.0f\n",
-                    coursePhaseName(coursePhase), kCruiseBaseSpeed);
+    // Still line-following. After ramp time: right→90, then left→90 0.2 s later.
+    if (millis() >= secondTurnArmAfterMs) {
+      if (!rampStaggerStarted) {
+        rampStaggerStarted = true;
+        rampLeftCatchUpAtMs = millis() + kRampStaggerMs;
+        // Left stays at ramp briefly; right drops to cruise first.
+        telemetry.setBaseSpeeds(kRampBaseSpeed, kCruiseBaseSpeed);
+        Serial.println(F("[COURSE] ramp end — right→90, left catches up in 200 ms"));
+      } else if (!rampStaggerDone && millis() >= rampLeftCatchUpAtMs) {
+        rampStaggerDone = true;
+        telemetry.setBaseSpeeds(kCruiseBaseSpeed, kCruiseBaseSpeed);
+        Serial.println(F("[COURSE] left→90 — both cruise, line-follow continues"));
+      } else if (rampStaggerDone) {
+        telemetry.setBaseSpeeds(kCruiseBaseSpeed, kCruiseBaseSpeed);
+      }
+
+      if (rampStaggerDone && !secondTurnArmed &&
+          turned <= kSecondTurnRearmDeg) {
+        secondTurnArmed = true;
+        coursePhase = CoursePhase::PreSecond180;
+        resetImuTurnTracking(imuLastYawDeg);
+        Serial.printf("[COURSE] %s — cruise %.0f, watching second ~180\n",
+                      coursePhaseName(coursePhase), kCruiseBaseSpeed);
+      }
     }
     return;
   }
@@ -258,9 +285,9 @@ static void initTapeFollow() {
   config.samplesPerUpdate = 5;  // still ~100 Hz control
   // Gains sized for low base speed (was kp=80, which overpowered cruise).
   // Explicit zeros required — TapeFollowConfig defaults are kp=45, kd=10.
-  config.kp = 45.0f;
+  config.kp = 55.0f;
   config.ki = 0.0f;
-  config.kd = 15.0f;
+  config.kd = 18.0f;
   config.integralMax = 10.0f;
   tapeFollow.begin(config);
 }
