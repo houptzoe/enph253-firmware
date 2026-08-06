@@ -67,7 +67,7 @@ void MotorDriver::setBridgeSpeed(Bridge& bridge, float speed) {
   bridgeAllOff(bridge);
 
   if (prevDirection != 0 && newDirection != prevDirection) {
-    delay(kSwitchDeadtimeMs);  // deadtime when flipping FWD <-> REV
+    delay(kSwitchDeadtimeMs);  // 5 ms deadtime when flipping FWD <-> REV
   }
 
   bridge.direction = newDirection;

@@ -179,6 +179,22 @@
  C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/esp_hw_support/include/soc/esp32/spiram.h \
  C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/io_pin_remap.h \
  C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/Arduino.h \
- include/display/display.h include/hardware/pins.h \
- include/mission/mission.h include/motor/motor.h include/sensors/vision.h \
- include/pid/pid.h include/telemetry/telemetry.h
+ C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src/Wire.h \
+ C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal.h \
+ include/arm/arm.h \
+ .pio/libdeps/esp32-s3-devkitm-1/Adafruit\ GFX\ Library/Adafruit_GFX.h \
+ C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/Print.h \
+ .pio/libdeps/esp32-s3-devkitm-1/Adafruit\ GFX\ Library/gfxfont.h \
+ .pio/libdeps/esp32-s3-devkitm-1/Adafruit\ BusIO/Adafruit_I2CDevice.h \
+ .pio/libdeps/esp32-s3-devkitm-1/Adafruit\ BusIO/Adafruit_SPIDevice.h \
+ C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/libraries/SPI/src/SPI.h \
+ C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h \
+ .pio/libdeps/esp32-s3-devkitm-1/Adafruit\ SSD1306/Adafruit_SSD1306.h \
+ .pio/libdeps/esp32-s3-devkitm-1/ESP32Servo/src/ESP32Servo.h \
+ .pio/libdeps/esp32-s3-devkitm-1/ESP32Servo/src/ESP32PWM.h \
+ C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-ledc.h \
+ C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/driver/include/driver/mcpwm.h \
+ C:/Users/zclih/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/hal/include/hal/mcpwm_types.h \
+ include/hardware/pins.h include/metal/metal.h include/display/display.h \
+ include/hardware/status_leds.h include/motor/motor.h include/pid/pid.h \
+ include/sensors/imu.h include/sensors/vision.h include/sonar/sonar.h
